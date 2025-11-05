@@ -131,12 +131,12 @@ exports.getDrawing = async (req, res) => {
 
       let query = { deleted: false };
 
-      // 🔍 Project filter
+      //  Project filter
       if (req.query.project) {
         query.project = req.query.project;
       }
 
-      // 🔍 Search filter (Assembly No. / Drawing No.)
+      //  Search filter (Assembly No. / Drawing No.)
       if (req.query.search) {
         const search = req.query.search.trim();
         query.$or = [
@@ -2192,21 +2192,35 @@ exports.filterDrawingReports = async (req, res) => {
 
 }
 
-const oneGetDprGrid = async (project, search ) => {
+const oneGetDprGrid = async (project, search , page , limit  ) => {
   try {
     const matchObj = { deleted: false }
 
+    
     if (project) {
       matchObj.project = new ObjectId(project)
     }
 
+      if (search) {
+        const searchRegex = new RegExp(search.trim(), "i");
+        matchObj.$or = [
+            { assembly_no: { $regex: searchRegex } },
+            { drawing_no: { $regex: searchRegex } },
+        ];
+    }
+
+ const skip = (page - 1) * limit;
     const requestData = await Draw.aggregate([
       {
         $match: matchObj,
       },
-
-      
-
+      {
+        $facet: {
+          data: [
+            { $skip: skip },
+            { $limit: limit },
+         
+   
       {
         $lookup: {
           from: "contractors",
@@ -2476,22 +2490,24 @@ const oneGetDprGrid = async (project, search ) => {
                 createdAt: 1,
               }
             },
-                  ...(search && search.trim() !== ""
-        ? [
-            {
-              $match: {
-                $or: [
-                  { drawing_no: { $regex: search, $options: "i" } },
-                  { "gridItemsDetails.item_name": { $regex: search, $options: "i" } },
-                  { "drGridDetails.grid_no": { $regex: search, $options: "i" } },
-                  { "contractorData.name": { $regex: search, $options: "i" } },
-                  { "projectDetails.project_name": { $regex: search, $options: "i" } },
-                  { "projectDetails.clientDetails.party_name": { $regex: search, $options: "i" } }
-                ]
-              }
-            }
+        ...(search && search.trim() !== ""
+  ? [
+      {
+        $match: {
+          $or: [
+            { drawing_no: { $regex: search, $options: "i" } },
+            { rev: { $regex: search, $options: "i" } },
+            { assembly_no: { $regex: search, $options: "i" } },
+            { "gridItemsDetails.item_name": { $regex: search, $options: "i" } },
+            { "drGridDetails.grid_no": { $regex: search, $options: "i" } },
+            { "contractorData.name": { $regex: search, $options: "i" } },
+            { "projectDetails.project_name": { $regex: search, $options: "i" } },
+            { "projectDetails.clientDetails.party_name": { $regex: search, $options: "i" } }
           ]
-        : []),
+        }
+      }
+    ]
+  : []),
           ],
           as: "issueAcceptance",
         }
@@ -3570,8 +3586,1793 @@ const oneGetDprGrid = async (project, search ) => {
 
           release_note: "$rnDetails"
         }
-      }
+      },
+ ],
+           totalCount: [{ $count: "count" }],
+        }
+      },
+
+        
+ 
     ]);
+
+    
+    const data = requestData[0]?.data || [];
+    const total = requestData[0]?.totalCount[0]?.count || 0;
+
+    if (data.length > 0) {
+      return { status: 1, result: data, total };
+    } else {
+      return { status: 0, result: [], total: 0 };
+    }
+    // if (requestData.length > 0) {
+    //   return { status: 1, result: requestData };
+    // } else {
+    //   return { status: 0, result: [] };
+    // }
+  } catch (error) {
+    console.log(error, '333')
+    return { status: 2, result: error };
+  }
+}
+
+exports.dprGridReport = async (req, res) => {
+    if (req.user && !req.error) {
+        try {
+            // Get query parameters with sensible defaults
+            const project = req.query.project;
+            const page = req.query.page ? parseInt(req.query.page) : 1;
+            const limit = req.query.limit ? parseInt(req.query.limit) : 10;
+            const search = req.query.search || "";
+            
+            let matchObj = { deleted: false };
+            if (project) {
+                matchObj.project = new ObjectId(project);
+            }
+            
+            // Re-apply search logic for counting total documents
+            if (search) {
+                const searchRegex = new RegExp(search.trim(), "i");
+                matchObj.$or = [
+                    { assembly_no: { $regex: searchRegex } },
+                    { drawing_no: { $regex: searchRegex } },
+                ];
+            }
+            
+            // 1. Get total count first (This is fast)
+            const total = await Draw.countDocuments(matchObj);
+            
+            // 2. Get paginated data (Now fast because $skip/$limit is inside oneGetDprGrid)
+             const dataResult = await oneGetDprGrid(project, search, page, limit);
+            
+             console.log("status", dataResult.status);
+            //const dataResult = await oneGetDprGrid(project, "",search,  parseInt(page), parseInt(limit));
+          
+    if (dataResult.status !== 1 ) {
+      return sendResponse(res, 200, false, [], "No DPR Grid Report found");
+    }
+else{
+    return sendResponse(res, 200, true, {
+     
+       
+     data: dataResult.result,
+      pagination: {
+         total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+        totalPages: Math.ceil(dataResult.length / limit)
+      }
+    
+    });
+  } 
+}         
+
+         catch (err) {
+            console.error("dprGridReport error:", err);
+            sendResponse(res, 500, false, {}, "Something went wrong");
+        }
+    } else {
+        sendResponse(res, 401, false, {}, "Unauthorized");
+    }
+};
+
+// const oneGetDprGrid = async (project, search = "", page = 1, limit = 10) => {
+//   try {
+//     const matchObj = { deleted: false };
+//     if (project) matchObj.project = new ObjectId(project);
+
+//     // 🔍 optional text search on drawing/assembly
+//     if (search && search.trim() !== "") {
+//       matchObj.$or = [
+//         { drawing_no: { $regex: search, $options: "i" } },
+//         { assembly_no: { $regex: search, $options: "i" } }
+//       ];
+//     }
+
+//     const skip = (page - 1) * limit;
+
+//     // ⚡ Apply pagination BEFORE heavy lookups
+//     const requestData = await Draw.aggregate([
+//       { $match: matchObj },
+//       { $sort: { createdAt: -1 } },
+//       { $skip: skip },
+//       { $limit: limit },
+
+//       // --- contractor ---
+//       {
+//         $lookup: {
+//           from: "contractors",
+//           localField: "issued_person",
+//           foreignField: "_id",
+//           as: "contractorData",
+//         }
+//       },
+
+//       // --- grid items ---
+//       {
+//         $lookup: {
+//           from: "erp-drawing-grid-items",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "gridItemsDetails",
+//           pipeline: [
+//             {
+//               $lookup: {
+//                 from: "erp-drawing-grids",
+//                 localField: "grid_id",
+//                 foreignField: "_id",
+//                 as: "gridDetails"
+//               }
+//             },
+//             {
+//               $project: {
+//                 drawing_id: 1,
+//                 grid_id: 1,
+//                 assembly_weight: 1,
+//                 assembly_surface_area: 1,
+//                 gridDetails: { _id: 1, grid_no: 1, grid_qty: 1 }
+//               }
+//             }
+//           ]
+//         }
+//       },
+
+//       // --- issue requests ---
+//       {
+//         $lookup: {
+//           from: "drawing-issue_requests",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "issue_requests"
+//         }
+//       },
+
+//       // --- issue acceptance ---
+//       {
+//         $lookup: {
+//           from: "drawing-issue-acceptances",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "issue_acceptance"
+//         }
+//       },
+
+//       // --- fitup ---
+//       {
+//         $lookup: {
+//           from: "erp-fitup-inspections",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "fitupOffer"
+//         }
+//       },
+//       {
+//         $lookup: {
+//           from: "erp-fitup-inspection-acceptances",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "fitupAcceptance"
+//         }
+//       },
+
+//       // --- weld ---
+//       {
+//         $lookup: {
+//           from: "erp-weld-inspection-offers",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "weldVisualOffer"
+//         }
+//       },
+//       {
+//         $lookup: {
+//           from: "erp-weld-inspection-acceptances",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "weldVisualAcceptance"
+//         }
+//       },
+
+//       // --- ndt ---
+//       {
+//         $lookup: {
+//           from: "erp-ndt-inspections",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "ndt_details"
+//         }
+//       },
+
+//       // --- final dimensional ---
+//       {
+//         $lookup: {
+//           from: "erp-final-dim-offers",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "fdOffer"
+//         }
+//       },
+//       {
+//         $lookup: {
+//           from: "erp-final-dim-acceptances",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "fdAcceptance"
+//         }
+//       },
+
+//       // --- inspection summary ---
+//       {
+//         $lookup: {
+//           from: "erp-inspection-summaries",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "insSummary"
+//         }
+//       },
+
+//       // --- dispatch ---
+//       {
+//         $lookup: {
+//           from: "erp-painting-dispatch-notes",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "dispatch_note"
+//         }
+//       },
+
+//       // --- surface ---
+//       {
+//         $lookup: {
+//           from: "erp-paint-surfaces",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "surfaceOffer"
+//         }
+//       },
+//       {
+//         $lookup: {
+//           from: "erp-paint-surface-acceptances",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "surfaceAcceptance"
+//         }
+//       },
+
+//       // --- mio ---
+//       {
+//         $lookup: {
+//           from: "erp-paint-mios",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "mioOffer"
+//         }
+//       },
+//       {
+//         $lookup: {
+//           from: "erp-paint-mio-acceptances",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "mioAcceptance"
+//         }
+//       },
+
+//       // --- final coat ---
+//       {
+//         $lookup: {
+//           from: "erp-paint-final-coats",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "finalCoatOffer"
+//         }
+//       },
+//       {
+//         $lookup: {
+//           from: "erp-paint-final-coat-acceptances",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "finalCoatAcceptance"
+//         }
+//       },
+
+//       // --- release note ---
+//       {
+//         $lookup: {
+//           from: "erp-release-notes",
+//           localField: "_id",
+//           foreignField: "drawing_id",
+//           as: "release_note"
+//         }
+//       }
+//     ]);
+
+//     const total = await Draw.countDocuments(matchObj);
+
+//     return { status: 1, result: requestData, total };
+//   } catch (error) {
+//     console.error("oneGetDprGrid error:", error);
+//     return { status: 2, result: error };
+//   }
+// };
+
+// // --- Optimized dprGridReport ---
+// exports.dprGridReport = async (req, res) => {
+//   const { project } = req.body;
+//   const page = req.query.page ? parseInt(req.query.page, 10) : 1;
+//   const limit = req.query.limit ? parseInt(req.query.limit, 10) : 10;
+//   const search = req.query.search || "";
+
+//   if (req.user && !req.error) {
+//     try {
+//       const data = await oneGetDprGrid(project, search, page, limit);
+
+//       if (data.status === 1) {
+//         sendResponse(res, 200, true, {
+//           data: data.result,
+//           pagination: {
+//             total: data.total,
+//             page,
+//             pages: Math.ceil(data.total / limit),
+//             limit
+//           }
+//         }, "DPR Grid Report fetched successfully");
+//       } else {
+//         sendResponse(res, 500, false, {}, "Failed to fetch DPR");
+//       }
+//     } catch (err) {
+//       console.error("dprGridReport error:", err);
+//       sendResponse(res, 500, false, {}, "Something went wrong");
+//     }
+//   } else {
+//     sendResponse(res, 401, false, {}, "Unauthorized");
+//   }
+// };
+
+
+// exports.dprGridReport = async (req, res) => {
+//   const { project, page, limit } = req.query;
+
+//   if (!req.user || req.error) {
+//     return sendResponse(res, 401, false, {}, 'Unauthorized');
+//   }
+
+//   try {
+//     // Convert page and limit to integers
+//     const pageNumber = parseInt(page, 10);
+//     const limitNumber = parseInt(limit, 10);
+//     const offset = (pageNumber - 1) * limitNumber;
+
+//     // Get the full data (or ideally modify oneGetDprGrid to accept pagination params)
+//     const data = await oneGetDprGrid(project);
+//     let requestData = data.result;
+
+//     if (!Array.isArray(requestData) || requestData.length === 0) {
+//       return sendResponse(res, 200, false, [], "No DPR Grid Report found");
+//     }
+
+//     // Paginate the data (if oneGetDprGrid doesn't support pagination natively)
+//     const paginatedData = requestData.slice(offset, offset + limitNumber);
+
+//     return sendResponse(res, 200, true, {
+      
+//       data: paginatedData,
+//       pagination: {
+//         total: requestData.length,
+//         page: pageNumber,
+//         limit: limitNumber,
+//         totalPages: Math.ceil(requestData.length / limitNumber)
+//       }
+//     }, "DPR Grid Report fetched successfully");
+//   } catch (error) {
+//     return sendResponse(res, 500, false, {}, error.message);
+//   }
+// };
+
+
+const oneGetDprGrid1 = async (project,search ) => {
+  try {
+    const matchObj = { deleted: false }
+
+    if (project) {
+      matchObj.project = new ObjectId(project)
+    }
+
+    const requestData = await Draw.aggregate([
+      {
+        $match: matchObj,
+      },
+
+      {
+        $lookup: {
+          from: "contractors",
+          localField: "issued_person",
+          foreignField: "_id",
+          as: "contractorData",
+        },
+      },
+      {
+        $lookup: {
+          from: "erp-drawing-grid-items",
+          localField: "_id",
+          foreignField: "drawing_id",
+          as: "gridItemsDetails",
+          pipeline: [
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "grid_id",
+                foreignField: "_id",
+                as: "gridDetails",
+                pipeline: [
+                  {
+                    $project: {
+                      _id: 1,
+                      drawing_id: 1,
+                      grid_no: 1,
+                      grid_qty: 1
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              $project: {
+                _id: 1,
+                drawing_id: 1,
+                grid_id: 1,
+                item_name: 1,
+                gridDetails: 1,
+                assembly_weight: 1,
+                assembly_surface_area: 1,
+              }
+            }
+          ]
+        }
+      },
+      {
+        $lookup: {
+          from: "bussiness-projects",
+          localField: "project",
+          foreignField: "_id",
+          as: "projectDetails",
+          pipeline: [
+            {
+              $lookup: {
+                from: "store-parties",
+                localField: "party",
+                foreignField: "_id",
+                as: "clientDetails",
+              },
+            },
+          ],
+        }
+      },
+      {
+        $lookup: {
+          from: "erp-drawing-grids",
+          localField: "_id",
+          foreignField: "drawing_id",
+          as: "drGridDetails",
+          pipeline: [
+            {
+              $project: {
+                _id: 1,
+                drawing_id: 1,
+                grid_qty: 1,
+                grid_no: 1,
+              }
+            }
+          ]
+        }
+      },
+      {
+        $addFields: {
+          drGridDetails: {
+            $filter: {
+              input: "$drGridDetails",
+              as: "grid",
+              cond: {
+                $in: ["$$grid._id", {
+                  $map: {
+                    input: "$gridItemsDetails",
+                    as: "item",
+                    in: "$$item.grid_id"
+                  }
+                }]
+              }
+            }
+          }
+        }
+      },
+      // Issue Request =================================================================
+      {
+        $lookup: {
+          from: "multi-drawing-issue_requests",
+          let: {
+            drawingId: "$_id",
+            gridItems: "$gridItemsDetails"
+          },
+          pipeline: [
+            {
+              $match: { deleted: false }
+            },
+            {
+              $unwind: "$items"
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$items.drawing_id", "$$drawingId"] },
+                    { $in: ["$items.grid_item_id", "$$gridItems._id"] },
+                    // { $in: ["$items.grid_item_id", "$$gridItems.grid_id"] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: "erp-drawing-grid-items",
+                localField: "items.grid_item_id",
+                foreignField: "_id",
+                as: "gridItemDetails"
+              }
+            },
+            { $unwind: { path: "$gridItemDetails", preserveNullAndEmptyArrays: true } },
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "gridItemDetails.grid_id",
+                foreignField: "_id",
+                as: "gridDetails"
+              }
+            },
+            { $unwind: { path: "$gridDetails", preserveNullAndEmptyArrays: true } },
+            {
+              $project: {
+                _id: 0,
+                issue_req_no: 1,
+                used_grid_qty: "$items.used_grid_qty",
+                createdAt: 1,
+                grid_no: "$gridDetails.grid_no"
+              }
+            },
+            {
+              $group: {
+                _id: {
+                  issue_req_no: "$issue_req_no",
+                  used_grid_qty: "$used_grid_qty",
+                  grid_no: "$grid_no"
+                },
+                createdAt: { $first: "$createdAt" }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                issue_req_no: "$_id.issue_req_no",
+                used_grid_qty: "$_id.used_grid_qty",
+                grid_no: "$_id.grid_no",
+                createdAt: 1
+              }
+            }
+          ],
+          as: "issueRequests"
+        }
+      },
+      // Issue Acceptance =================================================================
+      {
+        $lookup: {
+          from: "multi-drawing-issue-acceptances",
+          let: {
+            drawingId: "$_id",
+            gridItems: "$gridItemsDetails"
+          },
+          pipeline: [
+            {
+              $match: { deleted: false }
+            },
+            {
+              $unwind: "$items"
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$items.drawing_id", "$$drawingId"] },
+                    { $in: ["$items.grid_item_id", "$$gridItems._id"] },
+                    // { $in: ["$items.grid_item_id", "$$gridItems.grid_id"] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: "multi-drawing-issue_requests",
+                localField: "issue_req_id",
+                foreignField: "_id",
+                as: "issReqDetails",
+              },
+            },
+            {
+              $addFields: {
+                issReqDetails: { $arrayElemAt: ["$issReqDetails", 0] },
+              },
+            },
+            {
+              $lookup: {
+                from: "erp-drawing-grid-items",
+                localField: "items.grid_item_id",
+                foreignField: "_id",
+                as: "gridItemDetails"
+              }
+            },
+            { $unwind: { path: "$gridItemDetails", preserveNullAndEmptyArrays: true } },
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "gridItemDetails.grid_id",
+                foreignField: "_id",
+                as: "gridDetails"
+              }
+            },
+            { $unwind: { path: "$gridDetails", preserveNullAndEmptyArrays: true } },
+            {
+              $project: {
+                _id: 0,
+                issue_accept_no: 1,
+                issue_req_no: "$issReqDetails.issue_req_no",
+                used_grid_qty: "$items.iss_used_grid_qty",
+                grid_no: "$gridDetails.grid_no",
+                is_accepted: "$items.is_accepted",
+                createdAt: 1,
+              }
+            },
+            {
+              $group: {
+                _id: {
+                  issue_accept_no: "$issue_accept_no",
+                  issue_req_no: "$issue_req_no",
+                  used_grid_qty: "$used_grid_qty",
+                  is_accepted: "$is_accepted",
+                  grid_no: "$grid_no"
+                },
+                createdAt: { $first: "$createdAt" }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                issue_accept_no: "$_id.issue_accept_no",
+                issue_req_no: "$_id.issue_req_no",
+                used_grid_qty: "$_id.used_grid_qty",
+                is_accepted: "$_id.is_accepted",
+                grid_no: "$_id.grid_no",
+                createdAt: 1,
+              }
+            },
+        ...(search && search.trim() !== ""
+  ? [
+      {
+        $match: {
+          $or: [
+            { drawing_no: { $regex: search, $options: "i" } },
+            { rev: { $regex: search, $options: "i" } },
+            { assembly_no: { $regex: search, $options: "i" } },
+            { "gridItemsDetails.item_name": { $regex: search, $options: "i" } },
+            { "drGridDetails.grid_no": { $regex: search, $options: "i" } },
+            { "contractorData.name": { $regex: search, $options: "i" } },
+            { "projectDetails.project_name": { $regex: search, $options: "i" } },
+            { "projectDetails.clientDetails.party_name": { $regex: search, $options: "i" } }
+          ]
+        }
+      }
+    ]
+  : []),
+          ],
+          as: "issueAcceptance",
+        }
+      },
+      // Fitup Details ==================================================================
+      {
+        $lookup: {
+          from: "multi-erp-fitup-inspections",
+          let: {
+            drawingId: "$_id",
+            gridItems: "$gridItemsDetails"
+          },
+          pipeline: [
+            {
+              $match: { deleted: false }
+            },
+            {
+              $unwind: "$items"
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$items.drawing_id", "$$drawingId"] },
+                    { $in: ["$items.grid_item_id", "$$gridItems._id"] },
+                    // { $in: ["$items.grid_item_id", "$$gridItems.grid_id"] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: "erp-drawing-grid-items",
+                localField: "items.grid_item_id",
+                foreignField: "_id",
+                as: "gridItemDetails"
+              }
+            },
+            { $unwind: { path: "$gridItemDetails", preserveNullAndEmptyArrays: true } },
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "gridItemDetails.grid_id",
+                foreignField: "_id",
+                as: "gridDetails"
+              }
+            },
+            { $unwind: { path: "$gridDetails", preserveNullAndEmptyArrays: true } },
+            {
+              $project: {
+                _id: 0,
+                report_no: 1,
+                report_no_two: 1,
+                createdAt: 1,
+                status: 1, // 1 = Pending, 2/3 = Accepted/Rejected,
+                fitOff_used_grid_qty: "$items.fitOff_used_grid_qty",
+                grid_no: "$gridDetails.grid_no",
+                is_accepted: "$items.is_accepted",
+                qc_date: "$qc_time",
+              }
+            },
+            {
+              $group: {
+                _id: {
+                  report_no: "$report_no",
+                  report_no_two: "$report_no_two",
+                  status: "$status",
+                  fitOff_used_grid_qty: "$fitOff_used_grid_qty",
+                  is_accepted: "$is_accepted",
+                  grid_no: "$grid_no",
+                },
+                createdAt: { $first: "$createdAt" },
+                qc_date: { $first: "$qc_date" }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: "$_id.report_no",
+                report_no_two: "$_id.report_no_two",
+                createdAt: 1,
+                status: "$_id.status",
+                fitOff_used_grid_qty: "$_id.fitOff_used_grid_qty",
+                is_accepted: "$_id.is_accepted",
+                qc_date: 1,
+                grid_no: "$_id.grid_no",
+              }
+            }
+          ],
+          as: "fitupDetails",
+        }
+      },
+      {
+        $addFields: {
+          fitupOffer: {
+            $filter: {
+              input: "$fitupDetails",
+              as: "fitup",
+              cond: { $gte: ["$$fitup.status", 1] } // Pending Fitup Offers
+            }
+          },
+          fitupAcceptance: {
+            $filter: {
+              input: "$fitupDetails",
+              as: "fitup",
+              cond: { $in: ["$$fitup.status", [2, 3]] } // Approved/Rejected Fitup Acceptances
+            }
+          }
+        }
+      },
+      // Weld Visual Field ==================================================================
+      {
+        $lookup: {
+          from: "multi-erp-weldvisual-inspections",
+          let: {
+            drawingId: "$_id",
+            gridItems: "$gridItemsDetails"
+          },
+          pipeline: [
+            {
+              $match: { deleted: false }
+            },
+            {
+              $unwind: "$items"
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$items.drawing_id", "$$drawingId"] },
+                    { $in: ["$items.grid_item_id", "$$gridItems._id"] },
+                    // { $in: ["$items.grid_item_id", "$$gridItems.grid_id"] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: "erp-drawing-grid-items",
+                localField: "items.grid_item_id",
+                foreignField: "_id",
+                as: "gridItemDetails"
+              }
+            },
+            { $unwind: { path: "$gridItemDetails", preserveNullAndEmptyArrays: true } },
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "gridItemDetails.grid_id",
+                foreignField: "_id",
+                as: "gridDetails"
+              }
+            },
+            { $unwind: { path: "$gridDetails", preserveNullAndEmptyArrays: true } },
+            {
+              $project: {
+                _id: 0,
+                report_no: 1,
+                report_no_two: 1,
+                createdAt: 1,
+                status: 1, // 1 = Pending, 2/3 = Accepted/Rejected,
+                weld_used_grid_qty: "$items.weld_used_grid_qty",
+                is_accepted: "$items.is_accepted",
+                grid_no: "$gridDetails.grid_no",
+                qc_date: "$qc_time",
+              }
+            },
+            {
+              $group: {
+                _id: {
+                  report_no: "$report_no",
+                  report_no_two: "$report_no_two",
+                  status: "$status",
+                  weld_used_grid_qty: "$weld_used_grid_qty",
+                  is_accepted: "$is_accepted",
+                  grid_no: "$grid_no",
+                },
+                createdAt: { $first: "$createdAt" },
+                qc_date: { $first: "$qc_date" }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: "$_id.report_no",
+                report_no_two: "$_id.report_no_two",
+                status: "$_id.status",
+                weld_used_grid_qty: "$_id.weld_used_grid_qty",
+                is_accepted: "$_id.is_accepted",
+                createdAt: 1,
+                grid_no: "$_id.grid_no",
+                qc_date: 1,
+              }
+            }
+          ],
+          as: "weldVisualDetails",
+        },
+      },
+      {
+        $addFields: {
+          weldVisualOffer: {
+            $filter: {
+              input: "$weldVisualDetails",
+              as: "weld",
+              cond: { $gte: ["$$weld.status", 1] }
+            }
+          },
+          weldVisualAcceptance: {
+            $filter: {
+              input: "$weldVisualDetails",
+              as: "weld",
+              cond: { $in: ["$$weld.status", [2, 3]] }
+            }
+          }
+        }
+      },
+      // NDT Details =================================================================
+      {
+        $lookup: {
+          from: "multi-erp-ndt-masters",
+          let: {
+            drawingId: "$_id",
+            gridItems: "$gridItemsDetails"
+          },
+          pipeline: [
+            {
+              $match: { deleted: false }
+            },
+            {
+              $unwind: "$items"
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$items.drawing_id", "$$drawingId"] },
+                    { $in: ["$items.grid_item_id", "$$gridItems._id"] },
+                    // { $in: ["$items.grid_item_id", "$$gridItems.grid_id"] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: "erp-drawing-grid-items",
+                localField: "items.grid_item_id",
+                foreignField: "_id",
+                as: "gridItemDetails"
+              }
+            },
+            { $unwind: { path: "$gridItemDetails", preserveNullAndEmptyArrays: true } },
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "gridItemDetails.grid_id",
+                foreignField: "_id",
+                as: "gridDetails"
+              }
+            },
+            { $unwind: { path: "$gridDetails", preserveNullAndEmptyArrays: true } },
+            {
+              $project: {
+                _id: 0,
+                report_no: 1,
+                ut_status: 1,
+                rt_status: 1,
+                mpt_status: 1,
+                lpt_status: 1,
+                createdAt: 1,
+                status: 1, // 1 = Pending, 2/3 = Accepted/Rejected,
+                ndt_used_grid_qty: "$items.ndt_used_grid_qty",
+                grid_no: "$gridDetails.grid_no",
+              }
+            },
+            {
+              $group: {
+                _id: {
+                  report_no: "$report_no",
+                  ut_status: "$ut_status",
+                  rt_status: "$rt_status",
+                  mpt_status: "$mpt_status",
+                  lpt_status: "$lpt_status",
+                  status: "$status",
+                  ndt_used_grid_qty: "$ndt_used_grid_qty",
+                  grid_no: "$grid_no",
+                },
+                createdAt: { $first: "$createdAt" }
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: "$_id.report_no",
+                status: "$_id.status",
+                createdAt: 1,
+                ndt_used_grid_qty: "$_id.ndt_used_grid_qty",
+                grid_no: "$_id.grid_no",
+                // Managing statuses
+                ut_status: {
+                  $switch: {
+                    branches: [
+                      { case: { $eq: ["$_id.ut_status", 1] }, then: "Pending" },
+                      { case: { $eq: ["$_id.ut_status", 2] }, then: "Offered" },
+                      { case: { $eq: ["$_id.ut_status", 3] }, then: "Completed" }
+                    ],
+                    default: ""
+                  }
+                },
+                rt_status: {
+                  $switch: {
+                    branches: [
+                      { case: { $eq: ["$_id.rt_status", 1] }, then: "Pending" },
+                      { case: { $eq: ["$_id.rt_status", 2] }, then: "Offered" },
+                      { case: { $eq: ["$_id.rt_status", 3] }, then: "Completed" }
+                    ],
+                    default: ""
+                  }
+                },
+                mpt_status: {
+                  $switch: {
+                    branches: [
+                      { case: { $eq: ["$_id.mpt_status", 1] }, then: "Pending" },
+                      { case: { $eq: ["$_id.mpt_status", 2] }, then: "Offered" },
+                      { case: { $eq: ["$_id.mpt_status", 3] }, then: "Completed" }
+                    ],
+                    default: ""
+                  }
+                },
+                lpt_status: {
+                  $switch: {
+                    branches: [
+                      { case: { $eq: ["$_id.lpt_status", 1] }, then: "Pending" },
+                      { case: { $eq: ["$_id.lpt_status", 2] }, then: "Offered" },
+                      { case: { $eq: ["$_id.lpt_status", 3] }, then: "Completed" }
+                    ],
+                    default: ""
+                  }
+                }
+              }
+            }
+          ],
+          as: "ndtDetails",
+        }
+      },
+      // Final Dimension Details ==================================================================
+      {
+        $lookup: {
+          from: "multi-erp-fd-masters",
+          let: {
+            drawingId: "$_id",
+            gridItems: "$gridItemsDetails"
+          },
+          pipeline: [
+            {
+              $match: { deleted: false }
+            },
+            {
+              $unwind: "$items"
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$items.drawing_id", "$$drawingId"] },
+                    { $in: ["$items.grid_id", "$$gridItems.grid_id"] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "items.grid_id",
+                foreignField: "_id",
+                as: "fdGridDetails",
+                pipeline: [
+                  {
+                    $project: {
+                      _id: 1,
+                      grid_no: 1,
+                      grid_qty: 1
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              $addFields: {
+                fdGridDetails: { $arrayElemAt: ["$fdGridDetails", 0] },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: 1,
+                report_no_two: 1,
+                createdAt: 1,
+                grid_id: "$fdGridDetails",
+                status: 1, // 1 = Pending, 2/3 = Accepted/Rejected,
+                fd_used_grid_qty: "$items.fd_used_grid_qty",
+                is_accepted: "$items.is_accepted",
+                qc_date: "$qc_time",
+              }
+            },
+            {
+              $group: {
+                _id: {
+                  report_no: "$report_no",
+                  report_no_two: "$report_no_two",
+                  status: "$status",
+                  grid_id: "$grid_id",
+                  fd_used_grid_qty: "$fd_used_grid_qty",
+                  is_accepted: "$is_accepted"
+                },
+                createdAt: { $first: "$createdAt" },
+                qc_date: { $first: "$qc_date" },
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: "$_id.report_no",
+                report_no_two: "$_id.report_no_two",
+                createdAt: 1,
+                grid_id: "$_id.grid_id",
+                status: "$_id.status",
+                fd_used_grid_qty: "$_id.fd_used_grid_qty",
+                is_accepted: "$_id.is_accepted",
+                qc_date: 1,
+              }
+            }
+          ],
+          as: "fdDetails",
+        },
+      },
+      {
+        $addFields: {
+          fdOffer: {
+            $filter: {
+              input: "$fdDetails",
+              as: "fd",
+              cond: { $gte: ["$$fd.status", 1] }
+            }
+          },
+          fdAcceptance: {
+            $filter: {
+              input: "$fdDetails",
+              as: "fd",
+              cond: { $in: ["$$fd.status", [2, 3]] }
+            }
+          }
+        }
+      },
+      // Inspection Summary
+      {
+        $lookup: {
+          from: "multi-erp-inspect-summaries",
+          let: {
+            drawingId: "$_id",
+            gridItems: "$gridItemsDetails"
+          },
+          pipeline: [
+            { $match: { deleted: false, is_generate: true } },
+            {
+              $unwind: "$items"
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$items.drawing_id", "$$drawingId"] },
+                    { $in: ["$items.grid_id", "$$gridItems.grid_id"] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "items.grid_id",
+                foreignField: "_id",
+                as: "summaryGridDetails",
+                pipeline: [
+                  {
+                    $project: {
+                      _id: 1,
+                      grid_no: 1,
+                      grid_qty: 1
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              $addFields: {
+                summaryGridDetails: { $arrayElemAt: ["$summaryGridDetails", 0] },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: 1,
+                batch_id: 1,
+                is_grid_qty: "$items.is_grid_qty",
+                grid_id: "$summaryGridDetails",
+                summary_date: 1,
+              }
+            },
+            {
+              $group: {
+                _id: {
+                  report_no: "$report_no",
+                  batch_id: "$batch_id",
+                  grid_id: "$grid_id",
+                  is_grid_qty: "$is_grid_qty"
+                },
+                summary_date: { $first: "$summary_date" },
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: "$_id.report_no",
+                batch_id: "$_id.batch_id",
+                grid_id: "$_id.grid_id",
+                is_grid_qty: "$_id.is_grid_qty",
+                summary_date: 1,
+              }
+            }
+          ],
+          as: "insSummaryDetails",
+        }
+      },
+
+      // Dispatch Note =================================================================
+      {
+        $lookup: {
+          from: "multi-erp-painting-dispatch-notes",
+          let: {
+            drawingId: "$_id",
+            gridItems: "$gridItemsDetails"
+          },
+          pipeline: [
+            {
+              $match: { deleted: false }
+            },
+            {
+              $unwind: "$items"
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$items.drawing_id", "$$drawingId"] },
+                    { $in: ["$items.grid_id", "$$gridItems.grid_id"] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "items.grid_id",
+                foreignField: "_id",
+                as: "dnGridDetails",
+                pipeline: [
+                  {
+                    $project: {
+                      _id: 1,
+                      grid_no: 1,
+                      grid_qty: 1
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              $addFields: {
+                dnGridDetails: { $arrayElemAt: ["$dnGridDetails", 0] },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: 1,
+                dispatch_used_grid_qty: "$items.dispatch_used_grid_qty",
+                grid_id: "$dnGridDetails",
+                createdAt: 1,
+              }
+            },
+            {
+              $group: {
+                _id: {
+                  report_no: "$report_no",
+                  grid_id: "$grid_id",
+                  dispatch_used_grid_qty: "$dispatch_used_grid_qty"
+                },
+                createdAt: { $first: "$createdAt" },
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: "$_id.report_no",
+                grid_id: "$_id.grid_id",
+                dispatch_used_grid_qty: "$_id.dispatch_used_grid_qty",
+                createdAt: 1,
+              }
+            }
+          ],
+          as: "dnDetails",
+        },
+      },
+      // Surface Details =================================================================
+      {
+        $lookup: {
+          from: "multi-erp-surface-inspections",
+          let: {
+            drawingId: "$_id",
+            gridItems: "$gridItemsDetails"
+          },
+          pipeline: [
+            {
+              $match: { deleted: false }
+            },
+            {
+              $unwind: "$items"
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$items.drawing_id", "$$drawingId"] },
+                    { $in: ["$items.grid_id", "$$gridItems.grid_id"] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "items.grid_id",
+                foreignField: "_id",
+                as: "surfaceGridDetails",
+                pipeline: [
+                  {
+                    $project: {
+                      _id: 1,
+                      grid_no: 1,
+                      grid_qty: 1
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              $addFields: {
+                surfaceGridDetails: { $arrayElemAt: ["$surfaceGridDetails", 0] },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: 1,
+                report_no_two: 1,
+                status: 1, // 1-Pending 2-Partially 3-Approved 4-Rejected 
+                surface_used_grid_qty: "$items.surface_used_grid_qty",
+                grid_id: "$surfaceGridDetails",
+                is_accepted: "$items.is_accepted", // 2- Acc, 3- Rej
+                createdAt: 1,
+                qc_date: 1,
+              }
+            },
+            {
+              $group: {
+                _id: {
+                  report_no: "$report_no",
+                  grid_id: "$grid_id",
+                  report_no_two: "$report_no_two",
+                  status: "$status",
+                  surface_used_grid_qty: "$surface_used_grid_qty",
+                  is_accepted: "$is_accepted",
+                },
+                qc_date: { $first: "$qc_date" },
+                createdAt: { $first: "$createdAt" },
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: "$_id.report_no",
+                report_no_two: "$_id.report_no_two",
+                grid_id: "$_id.grid_id",
+                status: "$_id.status",
+                surface_used_grid_qty: "$_id.surface_used_grid_qty",
+                is_accepted: "$_id.is_accepted",
+                createdAt: 1,
+                qc_date: 1,
+              }
+            }
+          ],
+          as: "surfaceDetails",
+        }
+      },
+      {
+        $addFields: {
+          surfaceOffer: {
+            $filter: {
+              input: "$surfaceDetails",
+              as: "surface",
+              cond: { $gte: ["$$surface.status", 1] }
+            }
+          },
+          surfaceAcceptance: {
+            $filter: {
+              input: "$surfaceDetails",
+              as: "surface",
+              cond: { $in: ["$$surface.status", [2, 3, 4]] }
+            }
+          }
+        }
+      },
+      // MIO Details =================================================================
+      {
+        $lookup: {
+          from: "multi-erp-mio-inspections",
+          let: {
+            drawingId: "$_id",
+            gridItems: "$gridItemsDetails"
+          },
+          pipeline: [
+            {
+              $match: { deleted: false }
+            },
+            {
+              $unwind: "$items"
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$items.drawing_id", "$$drawingId"] },
+                    { $in: ["$items.grid_id", "$$gridItems.grid_id"] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "items.grid_id",
+                foreignField: "_id",
+                as: "mioGridDetails",
+                pipeline: [
+                  {
+                    $project: {
+                      _id: 1,
+                      grid_no: 1,
+                      grid_qty: 1
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              $addFields: {
+                mioGridDetails: { $arrayElemAt: ["$mioGridDetails", 0] },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: 1,
+                report_no_two: 1,
+                status: 1, // 1-Pending 2-Partially 3-Approved 4-Rejected 
+                mio_used_grid_qty: "$items.mio_used_grid_qty",
+                grid_id: "$mioGridDetails",
+                is_accepted: "$items.is_accepted", // 2- Acc, 3- Rej
+                createdAt: 1,
+                qc_date: 1,
+              }
+            },
+            {
+              $group: {
+                _id: {
+                  report_no: "$report_no",
+                  grid_id: "$grid_id",
+                  report_no_two: "$report_no_two",
+                  status: "$status",
+                  mio_used_grid_qty: "$mio_used_grid_qty",
+                  is_accepted: "$is_accepted"
+                },
+                createdAt: { $first: "$createdAt" },
+                qc_date: { $first: "$qc_date" },
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: "$_id.report_no",
+                report_no_two: "$_id.report_no_two",
+                grid_id: "$_id.grid_id",
+                status: "$_id.status",
+                mio_used_grid_qty: "$_id.mio_used_grid_qty",
+                is_accepted: "$_id.is_accepted",
+                createdAt: 1,
+                qc_date: 1,
+              }
+            }
+          ],
+          as: "mioDetails",
+        }
+      },
+      {
+        $addFields: {
+          mioOffer: {
+            $filter: {
+              input: "$mioDetails",
+              as: "mio",
+              cond: { $gte: ["$$mio.status", 1] }
+            }
+          },
+          mioAcceptance: {
+            $filter: {
+              input: "$mioDetails",
+              as: "mio",
+              cond: { $in: ["$$mio.status", [2, 3, 4]] }
+            }
+          }
+        }
+      },
+      // Final Coat Details =================================================================
+      {
+        $lookup: {
+          from: "multi-erp-final-coat-inspections",
+          let: {
+            drawingId: "$_id",
+            gridItems: "$gridItemsDetails"
+          },
+          pipeline: [
+            {
+              $match: { deleted: false }
+            },
+            {
+              $unwind: "$items"
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$items.drawing_id", "$$drawingId"] },
+                    { $in: ["$items.grid_id", "$$gridItems.grid_id"] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "items.grid_id",
+                foreignField: "_id",
+                as: "fcGridDetails",
+                pipeline: [
+                  {
+                    $project: {
+                      _id: 1,
+                      grid_no: 1,
+                      grid_qty: 1
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              $addFields: {
+                fcGridDetails: { $arrayElemAt: ["$fcGridDetails", 0] },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: 1,
+                report_no_two: 1,
+                status: 1, // 1-Pending 2-Partially 3-Approved 4-Rejected 
+                fc_used_grid_qty: "$items.fc_used_grid_qty",
+                grid_id: "$fcGridDetails",
+                is_accepted: "$items.is_accepted", // 2- Acc, 3- Rej
+                createdAt: 1,
+                qc_date: 1,
+              }
+            },
+            {
+              $group: {
+                _id: {
+                  report_no: "$report_no",
+                  grid_id: "$grid_id",
+                  report_no_two: "$report_no_two",
+                  status: "$status",
+                  fc_used_grid_qty: "$fc_used_grid_qty",
+                  is_accepted: "$is_accepted"
+                },
+                createdAt: { $first: "$createdAt" },
+                qc_date: { $first: "$qc_date" },
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: "$_id.report_no",
+                report_no_two: "$_id.report_no_two",
+                grid_id: "$_id.grid_id",
+                status: "$_id.status",
+                fc_used_grid_qty: "$_id.fc_used_grid_qty",
+                is_accepted: "$_id.is_accepted",
+                createdAt: 1,
+                qc_date: 1,
+              }
+            }
+          ],
+          as: "finalCoatDetails",
+        },
+      },
+      {
+        $addFields: {
+          finalCoatOffer: {
+            $filter: {
+              input: "$finalCoatDetails",
+              as: "finalCoat",
+              cond: { $gte: ["$$finalCoat.status", 1] }
+            }
+          },
+          finalCoatAcceptance: {
+            $filter: {
+              input: "$finalCoatDetails",
+              as: "finalCoat",
+              cond: { $in: ["$$finalCoat.status", [2, 3, 4]] }
+            }
+          }
+        }
+      },
+
+      // Release Note Details =================================================================
+      {
+        $lookup: {
+          from: "multi-erp-ins-release-notes",
+          let: {
+            drawingId: "$_id",
+            gridItems: "$gridItemsDetails"
+          },
+          pipeline: [
+            { $match: { deleted: false, is_generate: true } },
+            {
+              $unwind: "$items"
+            },
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$items.drawing_id", "$$drawingId"] },
+                    { $in: ["$items.grid_id", "$$gridItems.grid_id"] }
+                  ]
+                }
+              }
+            },
+            {
+              $lookup: {
+                from: "erp-drawing-grids",
+                localField: "items.grid_id",
+                foreignField: "_id",
+                as: "rnGridDetails",
+                pipeline: [
+                  {
+                    $project: {
+                      _id: 1,
+                      grid_no: 1,
+                      grid_qty: 1
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              $addFields: {
+                rnGridDetails: { $arrayElemAt: ["$rnGridDetails", 0] },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: 1,
+                batch_id: 1,
+                is_grid_qty: "$items.is_grid_qty",
+                grid_id: "$rnGridDetails",
+                release_date: 1,
+              }
+            },
+            {
+              $group: {
+                _id: {
+                  report_no: "$report_no",
+                  batch_id: "$batch_id",
+                  grid_id: "$grid_id",
+                  is_grid_qty: "$is_grid_qty"
+                },
+                release_date: { $first: "$release_date" },
+              }
+            },
+            {
+              $project: {
+                _id: 0,
+                report_no: "$_id.report_no",
+                batch_id: "$_id.batch_id",
+                grid_id: "$_id.grid_id",
+                is_grid_qty: "$_id.is_grid_qty",
+                release_date: 1,
+              }
+            }
+          ],
+          as: "rnDetails",
+        }
+      },
+
+      // ==========================================================
+      {
+        $addFields: {
+          projectDetails: { $arrayElemAt: ["$projectDetails", 0] },
+          contractorData: { $arrayElemAt: ["$contractorData", 0] },
+        },
+      },
+      {
+        $addFields: {
+          clientDetails: {
+            $arrayElemAt: ["$projectDetails.clientDetails", 0],
+          },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          issued_name: "$contractorData.name",
+          issued_id: "$contractorData._id",
+          issued_date: "$issued_date",
+          project_id: "$projectDetails._id",
+          project_name: "$projectDetails.name",
+          wo_no: "$projectDetails.work_order_no",
+          project_po_no: "$projectDetails.work_order_no",
+          client: "$clientDetails.name",
+          drawing_no: "$drawing_no",
+          unit: "$unit",
+          rev: "$rev",
+          assembly_no: "$assembly_no",
+          assembly_quantity: "$assembly_quantity",
+          grid_items: "$gridItemsDetails",
+          grid_data: "$drGridDetails",
+          issue_requests: "$issueRequests",
+          issue_acceptance: "$issueAcceptance",
+          fitupOffer: { report_no: 1, createdAt: 1, fitOff_used_grid_qty: 1, grid_no: 1, },
+          fitupAcceptance: { report_no: 1, report_no_two: 1, is_accepted: 1, fitOff_used_grid_qty: 1, qc_date: 1, grid_no: 1 },
+          weldVisualOffer: { report_no: 1, createdAt: 1, weld_used_grid_qty: 1, grid_no: 1, },
+          weldVisualAcceptance: { report_no: 1, report_no_two: 1, is_accepted: 1, weld_used_grid_qty: 1, qc_date: 1, grid_no: 1, },
+          ndt_details: "$ndtDetails",
+
+          fdOffer: { report_no: 1, createdAt: 1, fd_used_grid_qty: 1, grid_id: 1, },
+          fdAcceptance: { report_no: 1, report_no_two: 1, is_accepted: 1, fd_used_grid_qty: 1, grid_id: 1, qc_date: 1 },
+
+          dispatch_note: "$dnDetails",
+
+          insSummary: "$insSummaryDetails",
+
+          surfaceOffer: { report_no: 1, createdAt: 1, surface_used_grid_qty: 1, grid_id: 1, },
+          surfaceAcceptance: { report_no: 1, report_no_two: 1, is_accepted: 1, surface_used_grid_qty: 1, grid_id: 1, qc_date: 1 },
+          mioOffer: { report_no: 1, createdAt: 1, mio_used_grid_qty: 1, grid_id: 1, },
+          mioAcceptance: { report_no: 1, report_no_two: 1, createdAt: 1, is_accepted: 1, mio_used_grid_qty: 1, grid_id: 1, qc_date: 1 },
+          finalCoatOffer: { report_no: 1, createdAt: 1, fc_used_grid_qty: 1, grid_id: 1, },
+          finalCoatAcceptance: { report_no: 1, report_no_two: 1, createdAt: 1, is_accepted: 1, fc_used_grid_qty: 1, grid_id: 1, qc_date: 1 },
+
+          release_note: "$rnDetails"
+        }
+      },
+
+     
+    ]);
+
+    
 
     if (requestData.length > 0) {
       return { status: 1, result: requestData };
@@ -3584,53 +5385,13 @@ const oneGetDprGrid = async (project, search ) => {
   }
 }
 
-
-
-exports.dprGridReport = async (req, res) => {
-  const { project, page = 1, limit = 10 } = req.query;
-
-  if (!req.user || req.error) {
-    return sendResponse(res, 401, false, {}, 'Unauthorized');
-  }
-
-  try {
-    // Convert page and limit to integers
-    const pageNumber = parseInt(page, 10);
-    const limitNumber = parseInt(limit, 10);
-    const offset = (pageNumber - 1) * limitNumber;
-
-    // Get the full data (or ideally modify oneGetDprGrid to accept pagination params)
-    const data = await oneGetDprGrid(project);
-    let requestData = data.result;
-
-    if (!Array.isArray(requestData) || requestData.length === 0) {
-      return sendResponse(res, 200, false, [], "No DPR Grid Report found");
-    }
-
-    // Paginate the data (if oneGetDprGrid doesn't support pagination natively)
-    const paginatedData = requestData.slice(offset, offset + limitNumber);
-
-    return sendResponse(res, 200, true, {
-      data: paginatedData,
-      pagination: {
-        total: requestData.length,
-        page: pageNumber,
-        limit: limitNumber,
-        totalPages: Math.ceil(requestData.length / limitNumber)
-      }
-    }, "DPR Grid Report fetched successfully");
-  } catch (error) {
-    return sendResponse(res, 500, false, {}, error.message);
-  }
-};
-
 exports.drpXlsxGridReport = async (req, res) => {
   const { project } = req.body;
   if (!req.user || req.error) {
     return sendResponse(res, 401, false, {}, 'Unauthorized');
   }
   try {
-    const data = await oneGetDprGrid(project);
+    const data = await oneGetDprGrid1(project);
     let requestData = data.result;
     if (requestData?.length > 0) {
       const grouped = requestData.reduce((acc, item) => {
@@ -3848,7 +5609,7 @@ exports.drpXlsxGridReport = async (req, res) => {
 
       return sendResponse(res, 200, true, { file }, "DPR Grid Report generated successfully");
     } else {
-      return sendResponse(res, 200, false, [], "No DPR Grid Report f  ound");
+      return sendResponse(res, 200, false, [], "No DPR Grid Report found");
     }
   } catch (error) {
     return sendResponse(res, 500, false, {}, error.message);

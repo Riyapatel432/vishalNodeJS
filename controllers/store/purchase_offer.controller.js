@@ -7,16 +7,107 @@ const transaction_itemModel = require('../../models/store/transaction_item.model
 const requestModel = require('../../models/erp/planner/request.model');
 const projectModel = require('../../models/project.model');
 const mongoose = require("mongoose");
+const StoreItem = require('../../models/store/item.model');
 const { ObjectId } = mongoose.Types;
+// exports.getPurchaseOffer = async (req, res) => {
+//   const { requestId } = req.body;
+
+//   if (req.user && !req.error) {
+//     try {
+//       const query = { deleted: false };
+//       if (requestId) {
+//         query._id = requestId;
+//       }
+
+//       const data = await PurchaseOffer.find(query, { deleted: 0, __v: 0 })
+//         .populate('offeredBy', 'user_name')
+//         .populate({
+//           path: 'requestId',
+//           select: 'requestNo storeLocation department preparedBy material_po_no project status approvedBy drawing_id requestDate admin_approval_time',
+//           populate: [
+//             { path: 'department', select: 'name' },
+//             { path: 'project', select: 'name party work_order_no', populate: { path: 'party', select: 'name' } },
+//             { path: 'preparedBy', select: 'user_name' },
+//             { path: 'approvedBy', select: 'name' },
+//             { path: 'storeLocation', select: 'name' },
+//             {
+//               path: 'drawing_id',
+//               select: 'drawing_no sheet_no assembly_no rev assembly_quantity unit drawing_pdf drawing_pdf_name items draw_receive_date status',
+//             }
+//           ]
+//         }).populate({ path: 'items.offer_uom', select: 'name' })
+//         .populate('acceptedBy', 'user_name')
+//         .populate({ path: 'items.manufacture', select: 'name' })
+//         .populate({
+//           path: 'items.transactionId',
+//           select: 'tag itemName quantity balance_qty mcode remarks store_type unit_rate total_rate preffered_supplier status main_supplier manufacture',
+//           populate: [
+//             { path: 'preffered_supplier.supId', select: 'name' },
+//             { path: 'itemName', select: 'name unit', populate: { path: 'unit', select: 'name' } },
+//             { path: 'main_supplier', select: 'name' },
+//           ]
+//         }).sort({ createdAt: -1 })
+//         .lean()
+
+//       if (data) {
+//         sendResponse(res, 200, true, data, 'Purchase offer list')
+//       } else {
+//         sendResponse(res, 400, false, {}, 'Purchase offer not found ')
+//       }
+
+//     } catch (err) {
+//       console.error("Error while getting offerList: " + err);
+//       sendResponse(res, 500, false, {}, "Something went wrong");
+//     }
+//   } else {
+//     sendResponse(res, 401, false, {}, "Unauthorized");
+//   }
+// };
+
 exports.getPurchaseOffer = async (req, res) => {
   const { requestId } = req.body;
+  const { page , limit , projectId, search } = req.query;
 
   if (req.user && !req.error) {
     try {
+      // Base query for PurchaseOffer
       const query = { deleted: false };
+
       if (requestId) {
         query._id = requestId;
       }
+
+      // First, find the request IDs matching the projectId if provided
+      let requestIdFilter = {};
+      if (projectId) {
+        requestIdFilter = { project: projectId };
+      }
+
+      // Find requestIds that match projectId filter (only _id needed)
+      const filteredRequests = await requestModel.find(requestIdFilter).select('_id').lean();
+
+      // Extract array of _id's
+      const filteredRequestIds = filteredRequests.map(req => req._id);
+
+      // If filtering by projectId, filter PurchaseOffer by those requestIds
+      if (projectId) {
+        query.requestId = { $in: filteredRequestIds };
+      }
+
+      if (search && search.trim() !== '') {
+  const regex = new RegExp(search.trim(), 'i'); // case-insensitive regex
+  query.$or = [
+    { offer_no: { $regex: regex } },
+    { imir_no: { $regex: regex } }
+  ];
+}
+      // Pagination parameters
+      const pageNumber = parseInt(page);
+      const limitNumber = parseInt(limit);
+      const skip = (pageNumber - 1) * limitNumber;
+
+      // Total count for pagination
+      const totalItems = await PurchaseOffer.countDocuments(query);
 
       const data = await PurchaseOffer.find(query, { deleted: 0, __v: 0 })
         .populate('offeredBy', 'user_name')
@@ -34,7 +125,8 @@ exports.getPurchaseOffer = async (req, res) => {
               select: 'drawing_no sheet_no assembly_no rev assembly_quantity unit drawing_pdf drawing_pdf_name items draw_receive_date status',
             }
           ]
-        }).populate({ path: 'items.offer_uom', select: 'name' })
+        })
+        .populate({ path: 'items.offer_uom', select: 'name' })
         .populate('acceptedBy', 'user_name')
         .populate({ path: 'items.manufacture', select: 'name' })
         .populate({
@@ -45,15 +137,18 @@ exports.getPurchaseOffer = async (req, res) => {
             { path: 'itemName', select: 'name unit', populate: { path: 'unit', select: 'name' } },
             { path: 'main_supplier', select: 'name' },
           ]
-        }).sort({ createdAt: -1 })
-        .lean()
+        })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNumber)
+        .lean();
 
       if (data) {
-        sendResponse(res, 200, true, data, 'Purchase offer list')
+        // Return paginated data along with total count for frontend pagination
+        sendResponse(res, 200, true, { data, totalItems }, 'Purchase offer list');
       } else {
-        sendResponse(res, 400, false, {}, 'Purchase offer not found ')
+        sendResponse(res, 400, false, {}, 'Purchase offer not found');
       }
-
     } catch (err) {
       console.error("Error while getting offerList: " + err);
       sendResponse(res, 500, false, {}, "Something went wrong");
@@ -62,6 +157,7 @@ exports.getPurchaseOffer = async (req, res) => {
     sendResponse(res, 401, false, {}, "Unauthorized");
   }
 };
+
 
 // exports.updatePurchaseOffer = async (req, res) => {
 //   const { offerId, updateData } = req.body;
@@ -366,18 +462,6 @@ exports.managePurchaseOffer = async (req, res) => {
     return sendResponse(res, 401, false, {}, "Unauthorized");
   }
 
-    console.log("================================");
-  console.log("Request _ID",requestId);
-  console.log("================================");
-  console.log("items",items);
-  console.log("================================");
-  console.log("received_date",received_date);
-  console.log("================================");
-  console.log("offeredBy",offeredBy);
-  console.log("================================");
-  console.log("project",project);
-  console.log("================================");
-  console.log("invocerid",    invoice_no);
 
 
   if (!requestId || !offeredBy) {
@@ -413,6 +497,17 @@ exports.managePurchaseOffer = async (req, res) => {
       for (const item of itemVal) {
         const transactionItem = await TransactionItems.findById(item?.transactionId);
         if (!transactionItem) continue;
+
+         const storeItem = await StoreItem.findById(transactionItem.itemName);
+          if (storeItem) {
+            // Update material_grade if provided in purchase offer item
+            if (item?.material_grade) {
+              storeItem.material_grade = item.material_grade;
+              await storeItem.save();
+            }
+          }
+ 
+        transactionItem.mcode = item?.material_grade;
 
         transactionItem.balance_qty -= item?.offeredQty;
         if (transactionItem.balance_qty < 0) transactionItem.balance_qty = 0;
@@ -460,8 +555,6 @@ console.log("allItemsZeroBalance", allItemsZeroBalance);
     return sendResponse(res, 500, false, {}, "Something went wrong");
   }
 };
-
-
 
 
 // exports.managePurchaseOffer = async (req, res) => {

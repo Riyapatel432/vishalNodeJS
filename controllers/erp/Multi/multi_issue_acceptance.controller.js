@@ -597,10 +597,6 @@ for (const { offer } of offerBalances) {
 // };
 
 
-
-
-
-
 exports.getIssueAcceptance = async (req, res) => {
   let { id, project, page, limit } = req.body;
 
@@ -733,14 +729,173 @@ exports.getIssueAcceptance = async (req, res) => {
   }
 };
 
-exports.getIssueAcceptanceMasterData = async (req, res) => {
-  let { id, project, page, limit } = req.body;
+// exports.getIssueAcceptanceMasterData = async (req, res) => {
+//   // let { id, project, page, limit } = req.body;
+// let { id, project, page, limit, search } = req.body;
+//   // normalize search (handles array, query, body)
 
-  // normalize search (handles array, query, body)
-  const searchRaw = Array.isArray(req.query?.search)
-    ? req.query.search[0]
-    : req.query?.search || req.body?.search || "";
-  const search = typeof searchRaw === "string" ? searchRaw.trim() : "";
+
+//   const hasPagination = page !== undefined && limit !== undefined;
+//   const regex = search
+//   ? new RegExp(search.trim().replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&'), "i")
+//   : null;
+
+//   const pageNum = hasPagination ? parseInt(page) || 1 : 1;
+//   const limitNum = hasPagination ? parseInt(limit) || 10 : 0;
+//   const skip = (pageNum - 1) * limitNum;
+
+//   if (!req.user || req.error) {
+//     return sendResponse(res, 401, false, {}, "Unauthorized");
+//   }
+//   if (!project) {
+//     return sendResponse(res, 400, false, {}, "Project is required.");
+//   }
+
+//   try {
+//     let query = { deleted: false };
+//     if (id) query._id = id;
+
+// if (regex) {
+//   const userIds = await User.find({
+//     user_name: regex,
+//   }).distinct("_id");
+
+//   const searchConditions = [
+//     { issue_accept_no: regex },
+//     { "issue_requests.issue_req_no": regex },
+//     { "drawing_no": regex },
+//     { "items.assembly_no": regex },
+//     { "items.drawing_id.unit": regex },
+//     { "items.grid_item_id.item_no": regex },
+//     { "items.grid_item_id.section": regex },
+//     { "items.grid_item_id.grid_id.grid_no": regex },
+//     { "issue_req_id.items.grid_item_id.imir_no": regex },
+//   ];
+
+//   // if (drawingMatch.length > 0) {
+//   //   searchConditions.push({ "items.drawing_id": { $in: drawingMatch } });
+//   // }
+
+//   if (userIds.length > 0) {
+//     searchConditions.push({ issued_by: { $in: userIds } });
+//     searchConditions.push({ "issue_req_id.requested_by": { $in: userIds } });
+//   }
+
+//   query.$or = searchConditions;
+// }
+    
+
+
+//     //  Filter by project (intersects with search if both applied)
+//     const drawingIds = await Draw.find({
+//       deleted: false,
+//       project: project,
+//     }).distinct("_id");
+
+//     if (drawingIds.length > 0) {
+//       query["items.drawing_id"] = query["items.drawing_id"]
+//         ? {
+//             $in: drawingIds.filter((id) =>
+//               query["items.drawing_id"].$in.includes(id)
+//             ),
+//           }
+//         : { $in: drawingIds };
+//     } else {
+//       return sendResponse(
+//         res,
+//         200,
+//         true,
+//         {
+//           data: [],
+//           pagination: { total: 0, page: pageNum, limit: limitNum, totalPages: 0 },
+//         },
+//         "Material acceptance list"
+//       );
+//     }
+
+//     // 📊 Count total before pagination
+//     const totalCount = await IssueAcceptance.countDocuments(query);
+
+//     // Main query with populate
+//     let queryExec = IssueAcceptance.find(query, { deleted: 0 })
+//       .populate("issued_by", "user_name")
+//       .populate({
+//         path: "items.drawing_id",
+//         select: "project drawing_no rev sheet_no assembly_no unit",
+//         populate: {
+//           path: "project",
+//           select: "name party work_order_no",
+//           populate: { path: "party", select: "name" },
+//         },
+//       })
+//       .populate({
+//         path: "items.grid_item_id",
+//         select: "grid_id item_no item_name item_qty item_weight section",
+//         populate: [
+//           { path: "item_name", select: "name" },
+//           { path: "grid_id", select: "grid_no grid_qty" },
+//         ],
+//       })
+//       .populate({
+//         path: "issue_req_id",
+//         select: "issue_req_no items remarks requested_by createdAt",
+//         populate: [
+//           { path: "requested_by", select: "user_name" },
+//           {
+//             path: "items.grid_item_id",
+//             select: "imir_no",
+//           },
+//         ],
+//       })
+//       .sort({ createdAt: -1 });
+
+//     // Apply pagination
+//     if (hasPagination) {
+//       queryExec = queryExec.skip(skip).limit(limitNum);
+//     }
+
+//     const results = await queryExec.lean();
+
+//     // 📌 Group by issue_accept_no
+//     const groupedByAcceptNo = results.reduce((acc, record) => {
+//       const acceptNo = record.issue_accept_no || "UNKNOWN";
+//       if (!acc[acceptNo]) {
+//         acc[acceptNo] = {
+//           issue_accept_no: acceptNo,
+//           createdAt: record.createdAt,
+//           issued_by: record.issued_by,
+//           issue_req_id: record.issue_req_id,
+//           items: [],
+//         };
+//       }
+//       acc[acceptNo].items.push(...record.items);
+//       return acc;
+//     }, {});
+//     const finalResult = Object.values(groupedByAcceptNo);
+
+//     return sendResponse(
+//       res,
+//       200,
+//       true,
+//       {
+//         data: finalResult,
+//         pagination: {
+//           total: totalCount,
+//           page: hasPagination ? pageNum : 1,
+//           limit: hasPagination ? limitNum : totalCount,
+//           totalPages: hasPagination ? Math.ceil(totalCount / limitNum) : 1,
+//         },
+//       },
+//       "Acceptance list fetched successfully"
+//     );
+//   } catch (err) {
+//     console.error("Error fetching acceptance master data:", err);
+//     return sendResponse(res, 500, false, {}, "Internal Server Error");
+//   }
+// };
+
+exports.getIssueAcceptanceMasterData = async (req, res) => {
+  let { id, project, page, limit, search } = req.body;
 
   const hasPagination = page !== undefined && limit !== undefined;
   const pageNum = hasPagination ? parseInt(page) || 1 : 1;
@@ -753,29 +908,59 @@ exports.getIssueAcceptanceMasterData = async (req, res) => {
   if (!project) {
     return sendResponse(res, 400, false, {}, "Project is required.");
   }
+  
 
   try {
-    let query = { deleted: false };
-    if (id) query._id = id;
+    const regex = search
+      ? new RegExp(search.trim().replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&'), "i")
+      : null;
 
-    // 🔍 Multi-field search
-    if (search) {
-      // Match assembly_no in Draw
-      const drawingMatch = await Draw.find({
-        assembly_no: { $regex: search, $options: "i" },
+    let andConditions = [{ deleted: false }];
+    if (id) andConditions.push({ _id: id });
+
+    let issueReqMatches = [];
+if (regex) {
+  issueReqMatches = await IssueRequest.find(
+    { issue_req_no: regex },
+    { _id: 1 }
+  ).distinct("_id");
+}
+
+    // If search is provided
+    let drawingMatch = [];
+    if (regex) {
+      // Match drawings
+      drawingMatch = await Draw.find({
+        $or: [
+          { drawing_no: regex },
+          { assembly_no: regex },
+          { sheet_no: regex },
+          { unit: regex },
+          
+        ],
         deleted: false,
       }).distinct("_id");
 
-      // Match users (issued_by or requested_by)
-      const userIds = await User.find({
-        user_name: { $regex: search, $options: "i" },
-      }).distinct("_id");
+      // Match users
+      const userIds = await User.find({ user_name: regex }).distinct("_id");
 
+      // Build search conditions
       const searchConditions = [
-        { issue_accept_no: { $regex: search, $options: "i" } }, // Acceptance Report No
-        { "issue_req_id.issue_req_no": { $regex: search, $options: "i" } }, // Material Issue Req. No
-        { "items.drawing_id.drawing_no": { $regex: search, $options: "i" } }, // Drawing No
+        { issue_accept_no: regex },
+        { "issue_req_id.issue_req_no": regex },
+        { "items.drawing_id.drawing_no": regex },
+        { "items.drawing_id.assembly_no": regex },
+        { "items.drawing_id.unit": regex },
+        { "items.grid_item_id.item_name.name": regex },
+        { "items.grid_item_id.grid_id.grid_no": regex },
+        { "items.imir_no": regex },
+        
       ];
+
+      if (issueReqMatches.length > 0) {
+  searchConditions.push({ issue_req_id: { $in: issueReqMatches } });
+}
+
 
       if (drawingMatch.length > 0) {
         searchConditions.push({ "items.drawing_id": { $in: drawingMatch } });
@@ -786,23 +971,17 @@ exports.getIssueAcceptanceMasterData = async (req, res) => {
         searchConditions.push({ "issue_req_id.requested_by": { $in: userIds } });
       }
 
-      query.$or = searchConditions;
+      andConditions.push({ $or: searchConditions });
     }
 
-    // 🎯 Filter by project (intersects with search if both applied)
+    // Filter by project drawings
     const drawingIds = await Draw.find({
       deleted: false,
       project: project,
     }).distinct("_id");
 
     if (drawingIds.length > 0) {
-      query["items.drawing_id"] = query["items.drawing_id"]
-        ? {
-            $in: drawingIds.filter((id) =>
-              query["items.drawing_id"].$in.includes(id)
-            ),
-          }
-        : { $in: drawingIds };
+      andConditions.push({ "items.drawing_id": { $in: drawingIds } });
     } else {
       return sendResponse(
         res,
@@ -816,7 +995,10 @@ exports.getIssueAcceptanceMasterData = async (req, res) => {
       );
     }
 
-    // 📊 Count total before pagination
+    // Final query
+    const query = andConditions.length > 1 ? { $and: andConditions } : andConditions[0];
+
+    // Count total before pagination
     const totalCount = await IssueAcceptance.countDocuments(query);
 
     // Main query with populate
@@ -859,7 +1041,7 @@ exports.getIssueAcceptanceMasterData = async (req, res) => {
 
     const results = await queryExec.lean();
 
-    // 📌 Group by issue_accept_no
+    // Group by issue_accept_no
     const groupedByAcceptNo = results.reduce((acc, record) => {
       const acceptNo = record.issue_accept_no || "UNKNOWN";
       if (!acc[acceptNo]) {
@@ -874,6 +1056,7 @@ exports.getIssueAcceptanceMasterData = async (req, res) => {
       acc[acceptNo].items.push(...record.items);
       return acc;
     }, {});
+
     const finalResult = Object.values(groupedByAcceptNo);
 
     return sendResponse(
@@ -896,227 +1079,6 @@ exports.getIssueAcceptanceMasterData = async (req, res) => {
     return sendResponse(res, 500, false, {}, "Internal Server Error");
   }
 };
-
-
-
-// exports.getIssueAcceptanceMasterData = async (req, res) => {
-//   const { id, page = 1, limit = 10 } = req.body;
-//   const { project } = req.body;
-
-//   if (!req.user || req.error) {
-//     return sendResponse(res, 401, false, {}, "Unauthorized");
-//   }
-
-//   if (!project) {
-//     return sendResponse(res, 400, false, {}, "Project is required.");
-//   }
-
-//   try {
-//     const parsedLimit = Math.min(parseInt(limit), 100);
-//     const parsedPage = Math.max(parseInt(page), 1);
-
-//     // Step 1: Fetch IssueAcceptance records (don't filter by drawing_id yet)
-//     const baseQuery = { deleted: false };
-//     if (id) {
-//       baseQuery._id = id;
-//     }
-
-//     let rawResults = await IssueAcceptance.find(baseQuery, { deleted: 0 })
-//       .populate("issued_by", "user_name")
-//       .populate({
-//         path: "items.drawing_id",
-//         select: "project drawing_no rev sheet_no assembly_no unit",
-//         populate: {
-//           path: "project",
-//           select: "_id name party work_order_no",
-//           populate: { path: "party", select: "name" },
-//         },
-//       })
-//       .populate({
-//         path: "items.grid_item_id",
-//         select: "grid_id item_no item_name item_qty item_weight",
-//         populate: [
-//     { path: "item_name", select: "name" },
-//     { path: "grid_id", select: "grid_no grid_qty" },
-//   ],
-//       })
-//       .populate({
-//         path: "issue_req_id",
-//         select: "issue_req_no items remarks requested_by createdAt",
-//         populate: [{ path: "requested_by", select: "user_name" }],
-//       })
-//       .sort({ createdAt: -1 })
-//       .lean();
-
-//     // Step 2: Filter by project (based on item.drawing_id.project)
-//     rawResults = rawResults.filter((record) =>
-//       record.items.some(
-//         (item) =>
-//           item.drawing_id?.project?._id?.toString() === project
-//       )
-//     );
-
-//     if (rawResults.length === 0) {
-//       return sendResponse(res, 404, false, {}, "No acceptance records found for this project.");
-//     }
-
-//     // Step 3: Apply pagination manually (after filtering)
-//     const totalRecords = rawResults.length;
-//     const totalPages = Math.ceil(totalRecords / parsedLimit);
-//     const paginatedResults = rawResults.slice((parsedPage - 1) * parsedLimit, parsedPage * parsedLimit);
-
-//     // Step 4: Group by issue_accept_no
-//     const groupedByAcceptNo = paginatedResults.reduce((acc, record) => {
-//       const acceptNo = record.issue_accept_no || "UNKNOWN";
-
-//       if (!acc[acceptNo]) {
-//         acc[acceptNo] = {
-//           issue_accept_no: acceptNo,
-//           createdAt: record.createdAt,
-//           issued_by: record.issued_by,
-//           issue_req_id: record.issue_req_id,
-//           items: [],
-//         };
-//       }
-
-//       acc[acceptNo].items.push(...record.items);
-//       return acc;
-//     }, {});
-
-//     const finalResult = Object.values(groupedByAcceptNo);
-
-//     return sendResponse(
-//       res,
-//       200,
-//       true,
-//       {
-//         data: finalResult,
-//         pagination: {
-//           total: totalRecords,
-//           page: parsedPage,
-//           limit: parsedLimit,
-//           totalPages: totalPages,
-//         },
-//       },
-//       "Acceptance list fetched successfully"
-//     );
-//   } catch (err) {
-//     console.error("Get Issue Acceptance Error:", err);
-//     return sendResponse(res, 500, false, {}, "Failed to fetch acceptance list");
-//   }
-// };
-
-
-// exports.getIssueAcceptanceMasterData = async (req, res) => {
-//   const { id, page = 1, limit = 10 } = req.body;
-//   const { project } = req.body;
-
-//   if (!req.user || req.error) {
-//     return sendResponse(res, 401, false, {}, "Unauthorized");
-//   }
-
-//   if (!project) {
-//     return sendResponse(res, 400, false, {}, "Project is required.");
-//   }
-
-//   try {
-//     const parsedLimit = Math.min(parseInt(limit), 100);
-//     const parsedPage = Math.max(parseInt(page), 1);
-
-//     // ✅ Step 1: Get relevant drawing IDs for the project
-//     const drawingIdsMatchingProject = await Draw.find({
-//       deleted: false,
-//       project: project,
-//     }).distinct("_id");
-
-//     if (drawingIdsMatchingProject.length === 0) {
-//       return sendResponse(res, 404, false, {}, "No drawings found for this project.");
-//     }
-
-//     // ✅ Step 2: Build query to fetch IssueAcceptance records
-//     const baseQuery = {
-//       deleted: false,
-//       "items.drawing_id": { $in: drawingIdsMatchingProject },
-//     };
-
-//     if (id) {
-//       baseQuery._id = id;
-//     }
-
-//     // ✅ Step 3: Fetch only relevant records (filtered at DB level)
-//     let rawResults = await IssueAcceptance.find(baseQuery, { deleted: 0 })
-//       .populate("issued_by", "user_name")
-//       .populate({
-//         path: "items.drawing_id",
-//         select: "project drawing_no rev sheet_no assembly_no unit",
-//         populate: {
-//           path: "project",
-//           select: "_id name party work_order_no",
-//           populate: { path: "party", select: "name" },
-//         },
-//       })
-//       .populate({
-//         path: "items.grid_item_id",
-//         select: "grid_id item_no item_qty item_weight",
-//         populate: { path: "grid_id", select: "grid_no grid_qty" },
-//       })
-//       .populate({
-//         path: "issue_req_id",
-//         select: "issue_req_no items remarks requested_by createdAt",
-//         populate: [{ path: "requested_by", select: "user_name" }],
-//       })
-//       .sort({ createdAt: -1 })
-//       .lean();
-
-//     if (rawResults.length === 0) {
-//       return sendResponse(res, 404, false, {}, "No acceptance records found for this project.");
-//     }
-
-//     // ✅ Step 4: Apply pagination
-//     const totalRecords = rawResults.length;
-//     const totalPages = Math.ceil(totalRecords / parsedLimit);
-//     const paginatedResults = rawResults.slice((parsedPage - 1) * parsedLimit, parsedPage * parsedLimit);
-
-//     // ✅ Step 5: Group by issue_accept_no
-//     const groupedByAcceptNo = paginatedResults.reduce((acc, record) => {
-//       const acceptNo = record.issue_accept_no || "UNKNOWN";
-
-//       if (!acc[acceptNo]) {
-//         acc[acceptNo] = {
-//           issue_accept_no: acceptNo,
-//           createdAt: record.createdAt,
-//           issued_by: record.issued_by,
-//           issue_req_id: record.issue_req_id,
-//           items: [],
-//         };
-//       }
-
-//       acc[acceptNo].items.push(...record.items);
-//       return acc;
-//     }, {});
-
-//     const finalResult = Object.values(groupedByAcceptNo);
-
-//     return sendResponse(
-//       res,
-//       200,
-//       true,
-//       {
-//         data: finalResult,
-//         pagination: {
-//           total: totalRecords,
-//           page: parsedPage,
-//           limit: parsedLimit,
-//           totalPages: totalPages,
-//         },
-//       },
-//       "Acceptance list fetched successfully"
-//     );
-//   } catch (err) {
-//     console.error("Get Issue Acceptance Error:", err);
-//     return sendResponse(res, 500, false, {}, "Failed to fetch acceptance list");
-//   }
-// };
 
 
 exports.getIssueAcceptanceExcelDownload = async (req, res) => {

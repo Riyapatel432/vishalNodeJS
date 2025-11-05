@@ -38,6 +38,7 @@ app.post("/api/upload-image", helperController.uploadFile);
 app.post('/api/upload-multiple-image', helperController.uploadMutipleFiles);
 app.post('/api/upload-excel', helperController.uploadExcelFiles);
 
+
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/pdfs', express.static(path.join(__dirname, 'pdfs')));
 app.use('/xlsx-formats', express.static(path.join(__dirname, 'xlsx-formats')));

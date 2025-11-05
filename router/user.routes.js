@@ -9,7 +9,11 @@ module.exports = (app) => {
 
   const firm = require("../controllers/firm.controller");
   const user = require("../controllers/user.controller");
+const express = require("express");
 
+
+const multer = require("multer");
+const path = require("path");
   // Payroll =============================================================================
 
   const employee = require("../controllers/payroll/employ.controller");
@@ -19,12 +23,14 @@ module.exports = (app) => {
   const department = require("../controllers/payroll/department.controller");
   const salary = require("../controllers/payroll/salary.controller");
   const bank = require("../controllers/payroll/bank.controller");
+  const category = require("../controllers/payroll/category.controller");
   const group = require("../controllers/payroll/group.controller");
 
   const monthly = require("../controllers/payroll/monthly.attendance.controller");
   const daily = require("../controllers/payroll/daily.attendance.controller");
   const holiday = require("../controllers/payroll/holiday.controller");
   const deduction = require("../controllers/payroll/deduction.controller");
+  const partyBill = require("../controllers/payroll/partyBill.controller");
   const earning = require("../controllers/payroll/earning.controller");
   const loan = require("../controllers/payroll/loan.controller");
   const authPerson = require("../controllers/payroll/auth_person.controller");
@@ -115,6 +121,15 @@ module.exports = (app) => {
   const Dmr = require('../controllers/erp/ManResource/manresource.controller');
   const DmrCategory = require('../controllers/erp/ManResource/manresourcecategory.controller');
 
+    //================FIM================================================================================
+  const FimPackingList = require('../controllers/erp/FIM/FIM.controller');
+
+  // ================Area Module========================================================================
+  const AreaModule = require('../controllers/erp/Area/area.controller');
+
+  //============ Material Procurement MTO =========================================================
+  const MaterialMto = require("../controllers/material_procurement/material_mto.controller");
+
   
   //================Multiple drawings=================================================================
   const MultiRequest = require('../controllers/erp/Multi/multi_issue_request.controller');
@@ -159,6 +174,27 @@ module.exports = (app) => {
   const year = require("../controllers/year.controller");
 
 
+
+  //Piping  Routes  =========================================================================================
+
+  const wps = require("../controllers/piping/WPS/wps.controller");
+  const Welder = require("../controllers/piping/Welder/welder.controller");
+  const PaintRequirement = require("../controllers/piping/PaintingRequirement/paintrequirement.controller");
+  const PaintingSystem = require("../controllers/piping/PaintingSystem/paintingSystem.controller");
+  const FinalCoatShade = require("../controllers/piping/FinalCoatShade/FinalCoatShade.controller");
+  const Ndt = require("../controllers/piping/NDT/ndt.controller");
+  const pwht = require("../controllers/piping/PWHT/pwht.controller");
+  const Hardness = require("../controllers/piping/Hardness/hardness.controller");
+  const procedureAndSpecification = require("../controllers/piping/ProcedureAndSpecification/procedure_specification.controller");
+  const jointTypePiping = require("../controllers/piping/JointType/jointTypePiping.controller");
+  const Request = require("../controllers/piping/PipingClass/request.controller");
+  const drawing = require("../controllers/piping/Drawing/drawing.controller");
+  const drawingMatreialItem = require("../controllers/piping/Drawing/drawingMatreialItem.controller");
+  const drawingJointWiseItem = require("../controllers/piping/Drawing/drawingJointWiseItem.controller");
+ const drawingSpoolNoDetail = require("../controllers/piping/Drawing/drawingSpoolNoDetail.controller");
+  const itemPiping = require("../controllers/piping/Item/itemPiping.controller");
+  const itemDetailCategory = require("../controllers/piping/ItemDetailsCategory/itemDetailcategory.controller");
+  const UOM = require("../controllers/piping/UOM/uom.controller");
   // ==============================================================================================
   router.post("/login", user.loginUser);
   router.get("/get-year", year.getYear);
@@ -257,6 +293,13 @@ module.exports = (app) => {
   router.post("/manage-bank", bank.manageBank);
   router.delete("/delete-bank", bank.deleteBank);
 
+
+  router.get("/get-category", category.getCategory);
+  router.get("/get-admin-category", category.getAdminCategory);
+  router.post("/manage-category", category.manageCategory);
+  router.delete("/delete-category", category.deleteCategory);
+
+
   router.get("/get-group", group.getGroup);
   router.get("/get-admin-group", group.getAdminGroup);
   router.post("/manage-group", group.manageGroup);
@@ -292,6 +335,33 @@ module.exports = (app) => {
   router.delete("/delete-deduction", deduction.deleteDeduction);
   router.post("/generate-deduction-report", deduction.getDeductionReport);
   router.post("/generate-loan-report", deduction.getLoanReceiveReport);
+
+
+  const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads"); // folder where files will be stored
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + path.extname(file.originalname)); 
+  },
+});
+
+const upload = multer({ storage: storage });
+
+// upload.single("file"),
+  router.post("/manage-party-bill",upload.single("file"), partyBill.managePartyBill);
+  router.get("/get-party-bill",partyBill.getAllPartyBills);
+  router.put("/update-party-bill/:id/:slug?",upload.single("file"), partyBill.updatePartyBill);
+  router.get("/get-party-bill-by-id/:id/:slug?", partyBill.getPartyBillById);
+  router.get("/get-firm-party-bill", partyBill.getFirmPartyBill);
+  router.get("/get-invoice-by-project/:projectId", partyBill.getInvoicesByProject);
+  router.get("/get-party-by-project-bank-details", partyBill.getPartyByProjectAndBankDetails);
+  router.get("/get-po-by-party/:partyId", partyBill.getPoByParty);
+  router.delete('/delete-party-bill/:id/:slug?', partyBill.deletePartyBill);
+  router.get("/get-site-location",partyBill.getSiteLocation);
+  router.get("/get-all-projects",partyBill.getAllProjects);
+  router.get("/get-all-parties",partyBill.getAllParties);
+router.post("/party-bill-export-excel-download", partyBill.exportPartyBillExcelDownload);
 
   router.get("/get-earning", earning.getEarning);
   router.get("/get-admin-earning", earning.getAdminEarning);
@@ -615,6 +685,7 @@ module.exports = (app) => {
 
   // router.post("/manage-request", request.manageRequest);
   router.post("/get-request", request.getRequest);
+  router.post("/get-request-status", request.getRequestStatus);
   router.post("/get-request-edit", request.getRequestEdit);
   router.post("/get-store-request", request.getStoreRequest);
   router.post("/get-store-request-item", request.downloadOneRequestItem);
@@ -959,6 +1030,8 @@ module.exports = (app) => {
   router.post('/add-multi-surface-offer', MultiSurfaceInspection.generateSurfaceOffer);
   // router.post('/add-multi-surface-offer-from-dispatch', MultiSurfaceInspection.generateSurfaceOfferFromDispatch);
   router.post('/get-multi-surface', MultiSurfaceInspection.getMultiSurfaceInspectionOffer);
+ router.post('/get-view-multi-surface', MultiSurfaceInspection.getMultiSurfaceInspectionOfferViewPage);
+  router.post('/get-multi-surface-status', MultiSurfaceInspection.getMultiSurfaceInspectionOfferStatus);
   router.post('/verify-multi-surface', MultiSurfaceInspection.verifySurfaceQcDetails);
   router.post('/get-one-multi-surface', MultiSurfaceInspection.oneSurface);
   router.post('/download-multi-surface', MultiSurfaceInspection.downloadOneMultiSurface);
@@ -973,7 +1046,11 @@ module.exports = (app) => {
   router.post('/dnp-balance-update', MultiMIOOffer.updateDNPGridBalanceMio);
 
   router.post('/add-multi-mio-offer', MultiMIOInspection.generateMIOOffer);
+  router.post('/get-multi-mio-view-page', MultiMIOInspection.getMultiMIOInspectionOfferViewPage);
   router.post('/get-multi-mio', MultiMIOInspection.getMultiMIOInspectionOffer);
+
+  router.post('/get-multi-mio-clearance', MultiMIOInspection.getMultiMIOInspectionClearance);
+
   router.post('/verify-multi-mio', MultiMIOInspection.verifyMIOQcDetails);
   router.post('/get-one-multi-mio', MultiMIOInspection.oneMIO);
   router.post('/download-multi-mio', MultiMIOInspection.downloadOneMultiMIO);
@@ -989,6 +1066,12 @@ module.exports = (app) => {
 
   router.post('/add-multi-final-coat-offer', MultiFCInspection.generateFCOffer);
   router.post('/get-multi-final-coat', MultiFCInspection.getMultiFCInspectionOffer);
+  router.post('/get-multi-final-coat-view-page', MultiFCInspection.getMultiFCInspectionOfferViewPage);
+
+  router.post('/get-multi-final-coat-clearance', MultiFCInspection.getMultiFCInspectionClearance);
+  router.post('/get-multi-final-qc-offer', MultiFCInspection.getMultiFCQcOffer);
+
+
   router.post('/verify-multi-final_coat', MultiFCInspection.verifyFCQcDetails);
   router.post('/get-one-multi-final_coat', MultiFCInspection.oneFC);
   router.post('/download-multi-final_coat', MultiFCInspection.downloadOneMultiFC);
@@ -1027,6 +1110,38 @@ module.exports = (app) => {
   router.post("/dmr-categories/manage-dmr-category", DmrCategory.manageCategory);
   router.delete("/dmr-categories/delete-dmr-category", DmrCategory.deleteCategory);
 
+  // FIM Packing List
+  router.get("/fim/download-fim-format", FimPackingList.getSampleFIMImport);
+  router.post("/fim/manage-fim-packing", FimPackingList.manageFimPackingList);
+  router.post("/fim/manage-fim-packing-items", FimPackingList.manageFimPackingItems);
+  router.post('/fim/import-fim-items', FimPackingList.importFimItemsByName);
+  router.delete("/fim/delete-fim-packing-items", FimPackingList.deleteFimPackingItem);
+  router.post("/fim/get-fim-packing", FimPackingList.getFimPackingListById);
+  router.post('/fim/get-fim-packing-list', FimPackingList.getFimPackingListsByProject);
+  router.post('/fim/update-fim-status',  FimPackingList.updateFimPackingStatus);
+  router.post('/fim/send-fim-to-qc',  FimPackingList.sendFimPackingToQC);
+  router.post('/fim/download-fim-packing', FimPackingList.downloadFimPackingList);
+  router.post('/fim/fim-packing-export', FimPackingList.downloadFimPackingListExcel);
+  router.post('/fim/verify-fim-packing', FimPackingList.verifyFimPacking);
+  router.post('/fim/get-fim-report',FimPackingList.exportFimPackingListExcel);
+
+  // AREA/UNIT
+  router.post("/area-unit/get-area-unit", AreaModule.getAreas);
+  router.post("/area-unit/manage-area-unit", AreaModule.manageArea);
+  router.delete("/area-unit/delete-area-unit", AreaModule.deleteArea);
+
+
+  // MATERIAL PROCUREMENT MTO
+  router.post('/material/manage-material-mto',MaterialMto.manageMaterialMto);
+  router.post('/material/manage-mto-items',MaterialMto.manageMtoItems);
+  router.post('/material/generate-mto', MaterialMto.setMtoPendingStatus);
+  router.post('/material/get-all-material-mto', MaterialMto.getAllMaterialMto);
+  router.post('/material/get-material-mto-by-id', MaterialMto.getMaterialMtoById);
+  router.delete('/material/delete-material-mto', MaterialMto.deleteMaterialMto);
+  router.delete('/material/delete-mto-items', MaterialMto.deleteMaterialMtoItem);
+  router.post('/material/download-mto-pdf', MaterialMto.downloadMaterialMto);
+  
+
   router.get("/get-user-firm/:fId", firm.getUserFirm);
   router.get("/get-user-project/:pId", project.getOneProject);
   router.post("/get-project-in-ex", project.getProjectIncomeExpense);
@@ -1052,5 +1167,111 @@ module.exports = (app) => {
   router.post('/add-punch-machine-no', employee.addGatepassNo);
   router.get("/get-puch-employe-logs", punchMachine.getEmployeesWithPunchLogs);
   
+
+//====================================== Piping Module ===============================================
+
+  // WPS
+  router.post("/manage-wps", wps.saveWPS);
+  router.post("/get-all-wps", wps.getAllWPS);
+  router.delete("/delete-wps/:id", wps.deleteWPS);
+ 
+  //  welder
+  router.post("/manage-welder", Welder.saveWelder);
+  router.post("/get-all-welder", Welder.getAllWelder);
+  router.delete("/delete-welder/:id", Welder.deleteWelder);
+ 
+  router.post("/manage-paint-requirement", PaintRequirement.savePaintRequirement);
+  router.post("/get-all-paint-requirement", PaintRequirement.getAllPaintRequirement);
+  router.delete("/delete-paint-requirement/:id", PaintRequirement.deletePaintRequirement);
+ 
+  router.get("/get-piping-painting-system", PaintingSystem.getPaintingSystem);
+  router.post("/manage-piping-painting-system", PaintingSystem.managePaintingSystem);
+  router.delete("/delete-piping-painting-system", PaintingSystem.deletePaintingSystem);
+ 
+  router.post("/manage-final-coat-shade", FinalCoatShade.saveFinalCoatShade);
+  router.post("/get-all-final-coat-shade", FinalCoatShade.getAllFinalCoatShade);
+  router.delete("/delete-final-coat-shade/:id", FinalCoatShade.deleteFinalCoatShade);
+ 
+  router.post("/manage-piping-ndt", Ndt.saveNdt);
+  router.post("/get-all-piping-ndt", Ndt.getAllNdt);
+  router.delete("/delete-piping-ndt/:id", Ndt.deleteNdt);
+ 
+  router.post("/manage-pwht", pwht.savePWHT);
+  router.post("/get-all-pwht", pwht.getAllPWHT);
+  router.delete("/delete-pwht/:id", pwht.deletePWHT);
+ 
+  router.post("/manage-hardness", Hardness.saveHardness);
+  router.post("/get-all-hardness", Hardness.getAllHardness);
+  router.delete("/delete-hardness/:id", Hardness.deleteHardness);
+ 
+  router.get( "/get-piping-procedure-specification", procedureAndSpecification.getProcedureAndSpecification );
+  router.post( "/manage-piping-procedure-specification", procedureAndSpecification.manageProcedureAndSpecification );
+  router.delete( "/delete-piping-procedure-specification", procedureAndSpecification.deleteProcedureAndSpecification );
+  router.get("/download-xlsx-piping-procedure-specification", procedureAndSpecification.downloadProcedureAndSpecification);
+ 
+
+  
+  router.get("/get-joint-type-piping", jointTypePiping.getJointTypePiping);
+  router.post("/manage-joint-type-piping", jointTypePiping.manageJointTypePiping);
+  router.delete("/delete-joint-type-piping", jointTypePiping.deleteJointTypePiping);
+
+  router.get("/get-piping-request", Request.getRequest);
+  router.get("/get-piping-request-by-id", Request.getRequestById);
+ 
+  router.post("/manage-piping-request", Request.managePipingClass);
+  router.post("/manage-piping-item", Request.managePipingItems);
+  // router.post("/manage-piping-child-request", Request.managechildRequest);
+  router.delete("/delete-piping-request", Request.deleteRequest);
+  router.delete("/delete-piping-item", Request.deletePipingItem);
+
+  // router.get("/get-piping-drawing-list", drawing.getDrawingList);
+
+  router.get("/get-piping-item-Category", itemDetailCategory.getItemDetailCategory);
+  router.get("/get-piping-admin-item-Category", itemDetailCategory.getAdminItemDetailCategory);
+  router.post("/manage-piping-item-Category", itemDetailCategory.manageItemDetailCategory);
+  router.delete("/delete-piping-item-Category", itemDetailCategory.deleteItemDetailCategory);
+  router.post("/upload-piping-item-Category", itemDetailCategory.uploadItemDetailCategory);
+  router.get("/download-piping-item-Category-format", itemDetailCategory.downloadFormate);
+
+
+  router.get("/get-uom", UOM.getUOM);
+  router.get("/get-admin-uom", UOM.getAdminUOM);
+  router.post("/manage-uom", UOM.manageUOM);
+  router.delete("/delete-uom", UOM.deleteUOM);
+  router.post("/upload-uom", UOM.importUOM);
+  router.get("/download-uom-format", UOM.downloadFormate);
+  
+  //---------------------------------------- Item details--------------------------------------
+  router.post("/manage-item-details", itemPiping.manageItemDetails);
+  router.get("/get-admin-item-details", itemPiping.getAdminItemDetails);
+  router.get("/get-item-details", itemPiping.getItemDetails);
+ router.get("/download-items-details", itemPiping.downloadAdminItemDetailsList);
+
+  // ---------------------------------- line/drawing list -------------------------------------
+
+  router.post("/manage-piping-drawing", drawing.manageDrawingForPiping);
+  router.get("/get-piping-drawing", drawing.getDrawingForPiping);
+  router.post("/issue-piping-drawing", drawing.issuePipingDrawing);
+
+  // ---------------------------------- material wise entry -------------------------------------
+
+  router.post("/add-material-entry-item", drawingMatreialItem.addMaterialEntryItem);
+  router.post("/get-matreial-entry-items", drawingMatreialItem.getMaterialEntryItems);
+  router.get("/drawing-item-import-sample-piping", drawingMatreialItem.getDrawingImportSampleForPiping);
+  router.post("/import-matreial-entry-items", upload.single('file'),  drawingMatreialItem.importMaterialEntryPiping);
+  router.delete("/delete-matreial-entry-items/:id", drawingMatreialItem.deleteMaterialEntryItem);
+
+
+  router.get("/get-spool-no-detail", drawingSpoolNoDetail.getSpoolNoWiseDetail);
+  router.post("/manage-spool-no-detail", drawingSpoolNoDetail.manageSpoolNoWiseDetail);
+  router.delete("/delete-spool-no-detail", drawingSpoolNoDetail.deleteSpoolNoWiseDetail);
+
+
+  // ---------------------------------- Joint wise entry -------------------------------------
+
+  router.post("/add-joint-entry-item", drawingJointWiseItem.addJointEntryItem);
+  router.post("/get-joint-entry-items", drawingJointWiseItem.getJointEntryItems);
+  router.delete("/delete-joint-entry-items/:id", drawingJointWiseItem.deleteJointEntryItem);
+
   app.use("/api/user", router);
 };

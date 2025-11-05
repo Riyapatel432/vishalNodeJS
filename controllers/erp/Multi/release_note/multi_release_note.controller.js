@@ -847,139 +847,339 @@ exports.addDispatchMultiReleaseNotesData = async () => {
     }
 }
 
-exports.getMultiReleaseNoteList = async (req, res) => {
-    const { project_id } = req.body;
-    if (req.user && !req.error) {
-        let requestData = await MultiReleaseNote.aggregate([
-            { $match: { deleted: false, is_generate: false } },
-            { $unwind: "$items" },
-            {
-                $lookup: {
-                    from: "erp-planner-drawings",
-                    localField: "items.drawing_id",
-                    foreignField: "_id",
-                    as: "drawingDetails",
-                    pipeline: [
-                        {
-                            $lookup: {
-                                from: "bussiness-projects",
-                                localField: "project",
-                                foreignField: "_id",
-                                as: "projectDetails",
-                                pipeline: [
-                                    {
-                                        $lookup: {
-                                            from: "store-parties",
-                                            localField: "party",
-                                            foreignField: "_id",
-                                            as: "clientDetails",
-                                        },
-                                    },
-                                ],
-                            },
-                        }
-                    ]
-                }
-            },
-            {
-                $lookup: {
-                    from: "erp-drawing-grids",
-                    localField: "items.grid_id",
-                    foreignField: "_id",
-                    as: "gridDetails",
-                }
-            },
-            {
-                $addFields: {
-                    drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
-                    gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
-                },
-            },
-            {
-                $addFields: {
-                    projectDetails: {
-                        $arrayElemAt: ["$drawingDetails.projectDetails", 0],
-                    },
-                },
-            },
-            {
-                $addFields: {
-                    clientDetails: {
-                        $arrayElemAt: ["$projectDetails.clientDetails", 0],
-                    },
-                },
-            },
-            {
-                $match: { "projectDetails._id": new ObjectId(project_id) },
-            },
-            {
-                $project: {
-                    _id: 1,
-                    client: "$clientDetails.name",
-                    project_name: "$projectDetails.name",
-                    project_id: "$projectDetails._id",
-                    wo_no: "$projectDetails.work_order_no",
-                    project_po_no: "$projectDetails.work_order_no",
-                    createdAt: 1,
-                    items: {
-                        _id: "$items._id",
-                        drawing_no: "$drawingDetails.drawing_no",
-                        drawing_id: "$drawingDetails._id",
-                        rev: "$drawingDetails.rev",
-                        sheet_no: "$drawingDetails.sheet_no",
-                        assembly_no: "$drawingDetails.assembly_no",
-                        assembly_quantity: "$drawingDetails.assembly_quantity",
-                        grid_no: "$gridDetails.grid_no",
-                        grid_qty: "$gridDetails.grid_qty",
-                        is_grid_qty: "$items.is_grid_qty",
-                        dispatch_report: "$items.dispatch_report",
-                        fd_report: "$items.fd_report",
-                        mio_report: "$items.mio_report",
-                        surface_report: "$items.surface_report",
-                        final_coat_report: "$items.final_coat_report",
-                    }
-                }
-            },
-            {
-                $group: {
-                    _id: {
-                        _id: "$_id",
-                        project_name: "$project_name",
-                        project_id: "$project_id",
-                        wo_no: "$wo_no",
-                        project_po_no: "$project_po_no",
-                        client: "$client",
-                        createdAt: "$createdAt",
-                    },
-                    items: { $push: "$items" },
-                }
-            },
-            {
-                $project: {
-                    _id: "$_id._id",
-                    client: "$_id.client",
-                    project_name: "$_id.project_name",
-                    project_id: "$_id.project_id",
-                    wo_no: "$_id.wo_no",
-                    project_po_no: "$_id.project_po_no",
-                    createdAt: "$_id.createdAt",
-                    items: 1,
-                },
-            },
-            {
-                $sort: { createdAt: -1 }
-            },
-        ]);
+// exports.getMultiReleaseNoteList = async (req, res) => {
+//     const { project_id } = req.body;
+//     if (req.user && !req.error) {
+//         let requestData = await MultiReleaseNote.aggregate([
+//             { $match: { deleted: false, is_generate: false } },
+//             { $unwind: "$items" },
+//             {
+//                 $lookup: {
+//                     from: "erp-planner-drawings",
+//                     localField: "items.drawing_id",
+//                     foreignField: "_id",
+//                     as: "drawingDetails",
+//                     pipeline: [
+//                         {
+//                             $lookup: {
+//                                 from: "bussiness-projects",
+//                                 localField: "project",
+//                                 foreignField: "_id",
+//                                 as: "projectDetails",
+//                                 pipeline: [
+//                                     {
+//                                         $lookup: {
+//                                             from: "store-parties",
+//                                             localField: "party",
+//                                             foreignField: "_id",
+//                                             as: "clientDetails",
+//                                         },
+//                                     },
+//                                 ],
+//                             },
+//                         }
+//                     ]
+//                 }
+//             },
+//             {
+//                 $lookup: {
+//                     from: "erp-drawing-grids",
+//                     localField: "items.grid_id",
+//                     foreignField: "_id",
+//                     as: "gridDetails",
+//                 }
+//             },
+//             {
+//                 $addFields: {
+//                     drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
+//                     gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
+//                 },
+//             },
+//             {
+//                 $addFields: {
+//                     projectDetails: {
+//                         $arrayElemAt: ["$drawingDetails.projectDetails", 0],
+//                     },
+//                 },
+//             },
+//             {
+//                 $addFields: {
+//                     clientDetails: {
+//                         $arrayElemAt: ["$projectDetails.clientDetails", 0],
+//                     },
+//                 },
+//             },
+//             {
+//                 $match: { "projectDetails._id": new ObjectId(project_id) },
+//             },
+//             {
+//                 $project: {
+//                     _id: 1,
+//                     client: "$clientDetails.name",
+//                     project_name: "$projectDetails.name",
+//                     project_id: "$projectDetails._id",
+//                     wo_no: "$projectDetails.work_order_no",
+//                     project_po_no: "$projectDetails.work_order_no",
+//                     createdAt: 1,
+//                     items: {
+//                         _id: "$items._id",
+//                         drawing_no: "$drawingDetails.drawing_no",
+//                         drawing_id: "$drawingDetails._id",
+//                         rev: "$drawingDetails.rev",
+//                         sheet_no: "$drawingDetails.sheet_no",
+//                         assembly_no: "$drawingDetails.assembly_no",
+//                         assembly_quantity: "$drawingDetails.assembly_quantity",
+//                         grid_no: "$gridDetails.grid_no",
+//                         grid_qty: "$gridDetails.grid_qty",
+//                         is_grid_qty: "$items.is_grid_qty",
+//                         dispatch_report: "$items.dispatch_report",
+//                         fd_report: "$items.fd_report",
+//                         mio_report: "$items.mio_report",
+//                         surface_report: "$items.surface_report",
+//                         final_coat_report: "$items.final_coat_report",
+//                     }
+//                 }
+//             },
+//             {
+//                 $group: {
+//                     _id: {
+//                         _id: "$_id",
+//                         project_name: "$project_name",
+//                         project_id: "$project_id",
+//                         wo_no: "$wo_no",
+//                         project_po_no: "$project_po_no",
+//                         client: "$client",
+//                         createdAt: "$createdAt",
+//                     },
+//                     items: { $push: "$items" },
+//                 }
+//             },
+//             {
+//                 $project: {
+//                     _id: "$_id._id",
+//                     client: "$_id.client",
+//                     project_name: "$_id.project_name",
+//                     project_id: "$_id.project_id",
+//                     wo_no: "$_id.wo_no",
+//                     project_po_no: "$_id.project_po_no",
+//                     createdAt: "$_id.createdAt",
+//                     items: 1,
+//                 },
+//             },
+//             {
+//                 $sort: { createdAt: -1 }
+//             },
+//         ]);
 
-        if (requestData.length && requestData.length > 0) {
-            sendResponse(res, 200, true, requestData, `Release Note list`);
-        } else {
-            sendResponse(res, 200, true, [], `Release Note not found`);
+//         if (requestData.length && requestData.length > 0) {
+//             sendResponse(res, 200, true, requestData, `Release Note list`);
+//         } else {
+//             sendResponse(res, 200, true, [], `Release Note not found`);
+//         }
+//     } else {
+//         sendResponse(res, 401, false, {}, "Unauthorized");
+//     }
+// }
+
+exports.getMultiReleaseNoteList = async (req, res) => {
+    const { project_id} = req.body;
+    const { page , limit , search} = req.query;
+
+    if (req.user && !req.error) {
+        try {
+            const matchStage = {
+                $match: {
+                    deleted: false,
+                    is_generate: false,
+                },
+            };
+
+            // const searchMatchStage = {
+            //     $match: {
+            //         "projectDetails._id": new ObjectId(project_id),
+            //     },
+            // };
+
+             const projectMatchStage = {
+                $match: {
+                    "drawingDetails.projectDetails._id": new ObjectId(project_id),
+                },
+            };
+
+            // Search stage: drawing_no or assembly_no
+            const searchStage = search
+                ? {
+                      $match: {
+                          $or: [
+                              { "drawingDetails.drawing_no": { $regex: search, $options: "i" } },
+                              { "drawingDetails.assembly_no": { $regex: search, $options: "i" } },
+                          ],
+                      },
+                  }
+                : null;
+            // If drawing_no or assembly_no provided, add case-insensitive regex filters
+      
+            
+
+            const pipeline = [
+                matchStage,
+                { $unwind: "$items" },
+                {
+                    $lookup: {
+                        from: "erp-planner-drawings",
+                        localField: "items.drawing_id",
+                        foreignField: "_id",
+                        as: "drawingDetails",
+                        pipeline: [
+                            {
+                                $lookup: {
+                                    from: "bussiness-projects",
+                                    localField: "project",
+                                    foreignField: "_id",
+                                    as: "projectDetails",
+                                    pipeline: [
+                                        {
+                                            $lookup: {
+                                                from: "store-parties",
+                                                localField: "party",
+                                                foreignField: "_id",
+                                                as: "clientDetails",
+                                            },
+                                        },
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                },
+                {
+                    $lookup: {
+                        from: "erp-drawing-grids",
+                        localField: "items.grid_id",
+                        foreignField: "_id",
+                        as: "gridDetails",
+                    },
+                },
+                {
+                    $addFields: {
+                        drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
+                        gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
+                    },
+                },
+                {
+                    $addFields: {
+                        projectDetails: {
+                            $arrayElemAt: ["$drawingDetails.projectDetails", 0],
+                        },
+                    },
+                },
+                {
+                    $addFields: {
+                        clientDetails: {
+                            $arrayElemAt: ["$projectDetails.clientDetails", 0],
+                        },
+                    },
+                },
+                  projectMatchStage,
+                  ...(searchStage ? [searchStage] : []),
+                  
+                {
+                    $project: {
+                        _id: 1,
+                        client: "$clientDetails.name",
+                        project_name: "$projectDetails.name",
+                        project_id: "$projectDetails._id",
+                        wo_no: "$projectDetails.work_order_no",
+                        project_po_no: "$projectDetails.work_order_no",
+                        createdAt: 1,
+                        items: {
+                            _id: "$items._id",
+                            drawing_no: "$drawingDetails.drawing_no",
+                            drawing_id: "$drawingDetails._id",
+                            rev: "$drawingDetails.rev",
+                            sheet_no: "$drawingDetails.sheet_no",
+                            assembly_no: "$drawingDetails.assembly_no",
+                            assembly_quantity: "$drawingDetails.assembly_quantity",
+                            grid_no: "$gridDetails.grid_no",
+                            grid_qty: "$gridDetails.grid_qty",
+                            is_grid_qty: "$items.is_grid_qty",
+                            dispatch_report: "$items.dispatch_report",
+                            fd_report: "$items.fd_report",
+                            mio_report: "$items.mio_report",
+                            surface_report: "$items.surface_report",
+                            final_coat_report: "$items.final_coat_report",
+                        },
+                    },
+                },
+                {
+                    $group: {
+                        _id: {
+                            _id: "$_id",
+                            project_name: "$project_name",
+                            project_id: "$project_id",
+                            wo_no: "$wo_no",
+                            project_po_no: "$project_po_no",
+                            client: "$client",
+                            createdAt: "$createdAt",
+                        },
+                        items: { $push: "$items" },
+                    },
+                },
+                {
+                    $project: {
+                        _id: "$_id._id",
+                        client: "$_id.client",
+                        project_name: "$_id.project_name",
+                        project_id: "$_id.project_id",
+                        wo_no: "$_id.wo_no",
+                        project_po_no: "$_id.project_po_no",
+                        createdAt: "$_id.createdAt",
+                        items: 1,
+                    },
+                },
+                { $sort: { createdAt: -1 } },
+            ];
+
+  
+            // Count total records (before pagination)
+            const countPipeline = [...pipeline];
+            countPipeline.push({ $count: "total" });
+
+            const totalCountResult = await MultiReleaseNote.aggregate(countPipeline);
+            const totalCount = totalCountResult[0]?.total || 0;
+
+            let paginatedPipeline = [...pipeline];
+
+            // Apply pagination if limit is provided and greater than 0
+            const limitInt = parseInt(limit);
+            const pageInt = parseInt(page);
+
+            if (limitInt && limitInt > 0) {
+                const skip = (pageInt - 1) * limitInt;
+                paginatedPipeline.push({ $skip: skip }, { $limit: limitInt });
+            }
+
+            const requestData = await MultiReleaseNote.aggregate(paginatedPipeline);
+
+            return sendResponse(res, 200, true, {
+                data: requestData,
+                pagination:{
+              total: totalCount,
+                page: pageInt,
+                limit: limitInt ,
+                totalPages: limitInt && limitInt > 0 ? Math.ceil(totalCount / limitInt) : 1
+                }
+               
+            }, "Release Note list");
+
+        } catch (err) {
+            console.error("Error in getMultiReleaseNoteList:", err);
+            return sendResponse(res, 500, false, {}, "Something went wrong");
         }
     } else {
-        sendResponse(res, 401, false, {}, "Unauthorized");
+        return sendResponse(res, 401, false, {}, "Unauthorized");
     }
-}
+};
 
 exports.generateReleaseNote = async (req, res) => {
     const { id, project, user_id } = req.body;
@@ -1025,213 +1225,12 @@ exports.generateReleaseNote = async (req, res) => {
     }
 }
 
-
-
-// const generateReleaseNoteList = async (project_id, batch_id) => {
-//     try {
-//         let matchObj = { project_id: new ObjectId(project_id) };
-
-//         if (batch_id) {
-//             matchObj = { ...matchObj, batch_id: new ObjectId(batch_id) };
-//         }
-
-//         let requestData = await MultiReleaseNote.aggregate([
-//             { $match: { deleted: false, is_generate: true } },
-//             { $unwind: "$items" },
-//             {
-//                 $lookup: {
-//                     from: "erp-planner-drawings",
-//                     localField: "items.drawing_id",
-//                     foreignField: "_id",
-//                     as: "drawingDetails",
-//                     pipeline: [
-//                         {
-//                             $lookup: {
-//                                 from: "bussiness-projects",
-//                                 localField: "project",
-//                                 foreignField: "_id",
-//                                 as: "projectDetails",
-//                                 pipeline: [
-//                                     {
-//                                         $lookup: {
-//                                             from: "store-parties",
-//                                             localField: "party",
-//                                             foreignField: "_id",
-//                                             as: "clientDetails",
-//                                         },
-//                                     },
-//                                 ],
-//                             },
-//                         },
-//                     ],
-//                 },
-//             },
-//             {
-//                 $lookup: {
-//                     from: "erp-drawing-grids",
-//                     localField: "items.grid_id",
-//                     foreignField: "_id",
-//                     as: "gridDetails",
-//                 },
-//             },
-//             {
-//                 $lookup: {
-//                     from: "users",
-//                     localField: "prepared_by",
-//                     foreignField: "_id",
-//                     as: "prepared_by",
-//                     pipeline: [
-//                         { $project: { user_name: 1 } },
-//                     ]
-//                 }
-//             },
-//             {
-//                 $addFields: {
-//                     drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
-//                     gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
-//                     prepared_by: { $arrayElemAt: ["$prepared_by", 0] },
-//                 },
-//             },
-//             {
-//                 $addFields: {
-//                     projectDetails: {
-//                         $arrayElemAt: ["$drawingDetails.projectDetails", 0],
-//                     },
-//                 },
-//             },
-//             {
-//                 $addFields: {
-//                     clientDetails: {
-//                         $arrayElemAt: ["$projectDetails.clientDetails", 0],
-//                     },
-//                 },
-//             },
-//             {
-//                 $project: {
-//                     batch_id: 1,
-//                     client: "$clientDetails.name",
-//                     project_name: "$projectDetails.name",
-//                     project_id: "$projectDetails._id",
-//                     wo_no: "$projectDetails.work_order_no",
-//                     project_po_no: "$projectDetails.work_order_no",
-//                     report_no: "$report_no",
-//                     createdAt: 1,
-//                     prepared_by: "$prepared_by",
-//                     release_date: "$release_date",
-//                     items: {
-//                         _id: "$items._id",
-//                         main_id: "$_id",
-//                         drawing_no: "$drawingDetails.drawing_no",
-//                         drawing_id: "$drawingDetails._id",
-//                         rev: "$drawingDetails.rev",
-//                         sheet_no: "$drawingDetails.sheet_no",
-//                         unit_area: "$drawingDetails.unit",
-//                         assembly_no: "$drawingDetails.assembly_no",
-//                         assembly_quantity: "$drawingDetails.assembly_quantity",
-//                         release_date: "$release_date",
-//                         grid_no: "$gridDetails.grid_no",
-//                         grid_id: "$gridDetails._id",
-//                         grid_qty: "$gridDetails.grid_qty",
-//                         is_grid_qty: "$items.is_grid_qty",
-//                         moved_next_step: "$items.moved_next_step",
-//                         dispatch_report: "$items.dispatch_report",
-//                         fd_report: "$items.fd_report",
-//                         mio_paint_report: "$items.mio_report",
-//                         surface_primer_report: "$items.surface_report",
-//                         final_coat_paint_report: "$items.final_coat_report",
-//                     }
-//                 }
-//             },
-//             {
-//                 $match: matchObj,
-//             },
-//             {
-//                 $group: {
-//                     _id: {
-//                         batch_id: "$batch_id",
-//                         project_name: "$project_name",
-//                         project_id: "$project_id",
-//                         wo_no: "$wo_no",
-//                         project_po_no: "$project_po_no",
-//                         client: "$client",
-//                         report_no: "$report_no",
-//                         release_date: "$release_date",
-//                         prepared_by: "$prepared_by",
-//                     },
-//                     items: { $push: "$items" },
-//                 },
-//             },
-//             {
-//                 $project: {
-//                     _id: 0,
-//                     batch_id: "$_id.batch_id",
-//                     client: "$_id.client",
-//                     project_name: "$_id.project_name",
-//                     project_id: "$_id.project_id",
-//                     wo_no: "$_id.wo_no",
-//                     project_po_no: "$_id.project_po_no",
-//                     report_no: "$_id.report_no",
-//                     release_date: "$_id.release_date",
-//                     prepared_name: "$_id.prepared_by.user_name",
-//                     prepared_id: "$_id.prepared_by._id",
-//                     items: 1,
-//                 },
-//             },
-//             {
-//                 $sort: { report_no: -1 },
-//             },
-//         ]);
-
-
-//         // console.log('requestdata =======> ', requestData);
-
-//         if (requestData.length && requestData.length > 0) {
-//             return { status: 1, result: requestData };
-//         } else {
-//             return { status: 0, result: [] };
-//         }
-//     } catch (error) {
-//         return { status: 2, result: error };
-//     }
-// }
-
-exports.MultiGenerateReleaseNoteList = async (req, res) => {
-    const { project_id } = req.body;
-    if (req.user && !req.error) {
-        try {
-            const data = await generateReleaseNoteList(project_id);
-            let requestData = data.result;
-
-            if (data.status === 1) {
-                sendResponse(res, 200, true, requestData, "Release Note list fetched successfully");
-            } else if (data.status === 0) {
-                sendResponse(res, 200, false, [], "No Release Note found");
-            } else if (data.status === 2) {
-                // console.log("errr", data.result);
-                sendResponse(res, 500, false, [], "Something went wrong");
-            }
-        } catch (error) {
-            console.log("error", error);
-            sendResponse(res, 500, false, {}, "Something went wrong");
-        }
-    } else {
-        sendResponse(res, 401, false, {}, "Unauthorized");
-    }
-}
-
-
-const generateReleaseNoteList = async (project_id, batch_id) => {
+const generateReleaseNoteList = async (project_id, batch_id, page, limit, search) => {
     try {
-        let matchObj = { project_id: new ObjectId(project_id) };
+        const matchObj = { project_id: new ObjectId(project_id) };
+        if (batch_id) matchObj.batch_id = new ObjectId(batch_id);
 
-        if (batch_id) {
-            matchObj = { ...matchObj, batch_id: new ObjectId(batch_id) };
-        }
-
-        // console.log("Matched Project ID:", project_id);
-        // console.log("Matched Batch ID:", batch_id);
-
-        let requestData = await MultiReleaseNote.aggregate([
+        const pipeline = [
             {
                 $match: {
                     deleted: false,
@@ -1289,16 +1288,8 @@ const generateReleaseNoteList = async (project_id, batch_id) => {
                     drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
                     gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
                     prepared_by: { $arrayElemAt: ["$prepared_by", 0] },
-                },
-            },
-            {
-                $addFields: {
-                    projectDetails: {
-                        $arrayElemAt: ["$drawingDetails.projectDetails", 0],
-                    },
-                    clientDetails: {
-                        $arrayElemAt: ["$drawingDetails.projectDetails.clientDetails", 0],
-                    },
+                    projectDetails: { $arrayElemAt: ["$drawingDetails.projectDetails", 0] },
+                    clientDetails: { $arrayElemAt: ["$drawingDetails.projectDetails.clientDetails", 0] },
                 },
             },
             {
@@ -1309,10 +1300,10 @@ const generateReleaseNoteList = async (project_id, batch_id) => {
                     project_id: "$projectDetails._id",
                     wo_no: "$projectDetails.work_order_no",
                     project_po_no: "$projectDetails.work_order_no",
-                    report_no: "$report_no",
+                    report_no: 1,
                     createdAt: 1,
                     prepared_by: "$prepared_by",
-                    release_date: "$release_date",
+                    release_date: 1,
                     items: {
                         _id: "$items._id",
                         main_id: "$_id",
@@ -1337,9 +1328,25 @@ const generateReleaseNoteList = async (project_id, batch_id) => {
                     }
                 }
             },
-            {
-                $match: matchObj
-            },
+            { $match: matchObj },
+        ];
+
+        //  Search Filter
+        if (search?.trim()) {
+            const regex = new RegExp(search.trim(), "i"); // case-insensitive
+            pipeline.push({
+                $match: {
+                    $or: [
+                        { report_no: regex },
+                        { "items.assembly_no": regex }
+                    ]
+                }
+            });
+        }
+
+        
+        //  Group by batch + project + report
+        pipeline.push(
             {
                 $group: {
                     _id: {
@@ -1372,21 +1379,251 @@ const generateReleaseNoteList = async (project_id, batch_id) => {
                     items: 1,
                 },
             },
-            {
-                $sort: { report_no: -1 },
-            },
-        ]);
+            { $sort: { report_no: -1 } }
+        );
 
-        if (requestData.length && requestData.length > 0) {
-           
-            return { status: 1, result: requestData };
-        } else {
-            return { status: 0, result: [] };
+        //  Count pipeline for total
+        const countPipeline = [...pipeline, { $count: "total" }];
+        const totalCountResult = await MultiReleaseNote.aggregate(countPipeline);
+        const total = totalCountResult[0]?.total || 0;
+
+        //  Apply pagination only if limit is valid
+        const limitInt = parseInt(limit);
+        const pageInt = parseInt(page);
+        if (limitInt && limitInt > 0) {
+            pipeline.push({ $skip: (pageInt - 1) * limitInt }, { $limit: limitInt });
         }
+
+        const result = await MultiReleaseNote.aggregate(pipeline);
+
+        return {
+            status: 1,
+            result,
+            pagination: {
+                total,
+                page: pageInt || 1,
+                limit: limitInt || total,
+                totalPages: limitInt ? Math.ceil(total / limitInt) : 1
+            }
+        };
+
     } catch (error) {
         return { status: 2, result: error };
     }
+};
+
+// const generateReleaseNoteList = async (project_id, batch_id, page, limit, search) => {
+//     try {
+//         const matchObj = { project_id: new ObjectId(project_id) };
+//         if (batch_id) matchObj.batch_id = new ObjectId(batch_id);
+
+//         const pipeline = [
+//             {
+//                 $match: {
+//                     deleted: false,
+//                     is_generate: true,
+//                 }
+//             },
+//             { $unwind: "$items" },
+//             {
+//                 $lookup: {
+//                     from: "erp-planner-drawings",
+//                     localField: "items.drawing_id",
+//                     foreignField: "_id",
+//                     as: "drawingDetails",
+//                     pipeline: [
+//                         {
+//                             $lookup: {
+//                                 from: "bussiness-projects",
+//                                 localField: "project",
+//                                 foreignField: "_id",
+//                                 as: "projectDetails",
+//                                 pipeline: [
+//                                     {
+//                                         $lookup: {
+//                                             from: "store-parties",
+//                                             localField: "party",
+//                                             foreignField: "_id",
+//                                             as: "clientDetails",
+//                                         },
+//                                     },
+//                                 ],
+//                             },
+//                         },
+//                     ],
+//                 },
+//             },
+//             {
+//                 $lookup: {
+//                     from: "erp-drawing-grids",
+//                     localField: "items.grid_id",
+//                     foreignField: "_id",
+//                     as: "gridDetails",
+//                 },
+//             },
+//             {
+//                 $lookup: {
+//                     from: "users",
+//                     localField: "prepared_by",
+//                     foreignField: "_id",
+//                     as: "prepared_by",
+//                     pipeline: [{ $project: { user_name: 1 } }]
+//                 }
+//             },
+//             {
+//                 $addFields: {
+//                     drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
+//                     gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
+//                     prepared_by: { $arrayElemAt: ["$prepared_by", 0] },
+//                     projectDetails: { $arrayElemAt: ["$drawingDetails.projectDetails", 0] },
+//                     clientDetails: { $arrayElemAt: ["$drawingDetails.projectDetails.clientDetails", 0] },
+//                 },
+//             },
+//             {
+//                 $project: {
+//                     batch_id: 1,
+//                     client: "$clientDetails.name",
+//                     project_name: "$projectDetails.name",
+//                     project_id: "$projectDetails._id",
+//                     wo_no: "$projectDetails.work_order_no",
+//                     project_po_no: "$projectDetails.work_order_no",
+//                     report_no: "$report_no",
+//                     createdAt: 1,
+//                     prepared_by: "$prepared_by",
+//                     release_date: "$release_date",
+//                     items: {
+//                         _id: "$items._id",
+//                         main_id: "$_id",
+//                         drawing_no: "$drawingDetails.drawing_no",
+//                         drawing_id: "$drawingDetails._id",
+//                         rev: "$drawingDetails.rev",
+//                         sheet_no: "$drawingDetails.sheet_no",
+//                         unit_area: "$drawingDetails.unit",
+//                         assembly_no: "$drawingDetails.assembly_no",
+//                         assembly_quantity: "$drawingDetails.assembly_quantity",
+//                         release_date: "$release_date",
+//                         grid_no: "$gridDetails.grid_no",
+//                         grid_id: "$gridDetails._id",
+//                         grid_qty: "$gridDetails.grid_qty",
+//                         is_grid_qty: "$items.is_grid_qty",
+//                         moved_next_step: "$items.moved_next_step",
+//                         dispatch_report: "$items.dispatch_report",
+//                         fd_report: "$items.fd_report",
+//                         mio_paint_report: "$items.mio_report",
+//                         surface_primer_report: "$items.surface_report",
+//                         final_coat_paint_report: "$items.final_coat_report",
+//                     }
+//                 }
+//             },
+//             { $match: matchObj }
+//         ];
+
+//         //  Search Filter (regex, case-insensitive)
+//         const searchFilters = {};
+        
+//         // if (report_no?.trim()) {
+//         //     searchFilters.report_no = { $regex: report_no.trim(), $options: "i" };
+//         // }
+//         // if (assembly_no?.trim()) {
+//         //     searchFilters["items.assembly_no"] = { $regex: assembly_no.trim(), $options: "i" };
+//         // }
+//         // if (Object.keys(searchFilters).length > 0) {
+//         //     pipeline.push({ $match: searchFilters });
+//         // }
+
+//         pipeline.push(
+//             {
+//                 $group: {
+//                     _id: {
+//                         batch_id: "$batch_id",
+//                         project_name: "$project_name",
+//                         project_id: "$project_id",
+//                         wo_no: "$wo_no",
+//                         project_po_no: "$project_po_no",
+//                         client: "$client",
+//                         report_no: "$report_no",
+//                         release_date: "$release_date",
+//                         prepared_by: "$prepared_by",
+//                     },
+//                     items: { $push: "$items" },
+//                 },
+//             },
+//             {
+//                 $project: {
+//                     _id: 0,
+//                     batch_id: "$_id.batch_id",
+//                     client: "$_id.client",
+//                     project_name: "$_id.project_name",
+//                     project_id: "$_id.project_id",
+//                     wo_no: "$_id.wo_no",
+//                     project_po_no: "$_id.project_po_no",
+//                     report_no: "$_id.report_no",
+//                     release_date: "$_id.release_date",
+//                     prepared_name: "$_id.prepared_by.user_name",
+//                     prepared_id: "$_id.prepared_by._id",
+//                     items: 1,
+//                 },
+//             },
+//             { $sort: { report_no: -1 } }
+//         );
+
+//         //  Count pipeline for total
+//         const countPipeline = [...pipeline, { $count: "total" }];
+//         const totalCountResult = await MultiReleaseNote.aggregate(countPipeline);
+//         const total = totalCountResult[0]?.total || 0;
+
+//         //  Apply pagination only if limit is valid
+//         const limitInt = parseInt(limit);
+//         const pageInt = parseInt(page);
+//         if (limitInt && limitInt > 0) {
+//             pipeline.push({ $skip: (pageInt - 1) * limitInt }, { $limit: limitInt });
+//         }
+
+//         const result = await MultiReleaseNote.aggregate(pipeline);
+
+//         return {
+//             status: 1,
+//             result,
+//             pagination: {
+//                 total,
+//                 page: pageInt || 1,
+//                 limit: limitInt || total,
+//                 totalPages: limitInt ? Math.ceil(total / limitInt) : 1
+//             }
+//         };
+
+//     } catch (error) {
+//         return { status: 2, result: error };
+//     }
+// }
+
+exports.MultiGenerateReleaseNoteList = async (req, res) => {
+    const { project_id, batch_id } = req.body;
+    const { page, limit, search } = req.query;
+
+    if (req.user && !req.error) {
+        try {
+            const data = await generateReleaseNoteList(project_id, batch_id, page, limit,search);
+
+            if (data.status === 1) {
+                sendResponse(res, 200, true, {
+                    data: data.result,
+                    pagination: data.pagination
+                }, "Release Note list fetched successfully");
+            } else if (data.status === 0) {
+                sendResponse(res, 200, false, [], "No Release Note found");
+            } else {
+                sendResponse(res, 500, false, [], "Something went wrong");
+            }
+        } catch (error) {
+            console.log("error", error);
+            sendResponse(res, 500, false, {}, "Something went wrong");
+        }
+    } else {
+        sendResponse(res, 401, false, {}, "Unauthorized");
+    }
 }
+
 
 exports.downloadGenerateInspect = async (req, res) => {
     const { project_id, batch_id } = req.body;

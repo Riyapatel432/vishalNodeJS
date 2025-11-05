@@ -384,14 +384,113 @@ exports.getMultiInspectList = async (req, res) => {
 };
 
 
+// async function getLastInspection(project) {
+//   try {
+//     const pipeline = [
+//       {
+//         $match: {
+//           deleted: false,
+//           report_no_two: {
+//             $regex: `^VE/${project}/STR/ISR/\\d+$`,
+//             $options: 'i'
+//           }
+//         }
+//       },
+//       {
+//         $addFields: {
+//           inspectionNumber: {
+//             $toInt: {
+//               $arrayElemAt: [
+//                 { $split: ["$report_no_two", "/"] },
+//                 -1
+//               ]
+//             }
+//           }
+//         }
+//       },
+//       { $sort: { inspectionNumber: -1 } },
+//       { $limit: 1 },
+//       {
+//         $project: {
+//           _id: 1,
+//           report_no_two: 1,
+//           createdAt: 1,
+//           inspectionNumber: 1
+//         }
+//       }
+//     ];
+
+//     const [lastInspection] = await InspectSummary.aggregate(pipeline);
+//     console.log('Aggregation result:', lastInspection); // Debug log
+//     return lastInspection || null;
+//   } catch (error) {
+//     console.error('Error fetching last inspection:', error);
+//     throw error;
+//   }
+// }
+
+// exports.generateInspect = async (req, res) => {
+//     const { id, project } = req.body;
+
+//     if (req.user && !req.error) {
+//         try {
+//             if (id.length > 0) {
+//                 // const lastInspection = await InspectSummary.findOne(
+//                 //     { deleted: false, report_no: { $regex: new RegExp(`/${project}/`) } },
+//                 //     {},
+//                 //     { sort: { createdAt: -1 } }
+//                 // );
+//                 const lastInspection = await getLastInspection(project);
+
+//                 let inspectionNo = lastInspection?.report_no
+//                     ? parseInt(lastInspection.report_no.split("/").pop(), 10) + 1
+//                     : 1;
+
+//                 const gen_report_no =
+//                     TitleFormat.INSPECTSUMMARY.replace("/PROJECT/", `/${project}/`) +
+//                     inspectionNo;
+//                 const uniqueBatchId = new mongoose.Types.ObjectId();
+//                 const updateInspect = await InspectSummary.updateMany(
+//                     { _id: { $in: id } },
+//                     { $set: { is_generate: true, batch_id: uniqueBatchId, report_no: gen_report_no, summary_date: new Date() } },
+//                     { new: true }
+//                 );
+//                 if (updateInspect.modifiedCount > 0) {
+//                     sendResponse(
+//                         res,
+//                         200,
+//                         true,
+//                         {},
+//                         `Inspect summary generate successfully`
+//                     );
+//                 } else if (updateInspect.matchedCount == 0) {
+//                     sendResponse(res, 400, false, {}, `Inspect summary not found`);
+//                 }
+//             } else {
+//                 return sendResponse(res, 400, false, {}, "Missing parameters");
+//             }
+//         } catch (error) {
+//             console.log(error);
+//             sendResponse(res, 500, false, {}, "Something went wrong");
+//         }
+//     } else {
+//         sendResponse(res, 400, false, {}, "Unauthorised");
+//     }
+// };
+
+function escapeRegex(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 async function getLastInspection(project) {
   try {
+    const escapedProject = escapeRegex(project);
     const pipeline = [
       {
         $match: {
           deleted: false,
-          report_no_two: {
-            $regex: `^VE/${project}/STR/ISR/\\d+$`,
+          report_no: {
+            $regex: `^VE/${escapedProject}/STR/ISR/\\d+$`,
             $options: 'i'
           }
         }
@@ -401,7 +500,7 @@ async function getLastInspection(project) {
           inspectionNumber: {
             $toInt: {
               $arrayElemAt: [
-                { $split: ["$report_no_two", "/"] },
+                { $split: ["$report_no", "/"] },
                 -1
               ]
             }
@@ -413,14 +512,14 @@ async function getLastInspection(project) {
       {
         $project: {
           _id: 1,
-          report_no_two: 1,
+          report_no: 1,
           createdAt: 1,
           inspectionNumber: 1
         }
       }
     ];
 
-    const [lastInspection] = await FinalDimension.aggregate(pipeline);
+    const [lastInspection] = await InspectSummary.aggregate(pipeline);
     console.log('Aggregation result:', lastInspection); // Debug log
     return lastInspection || null;
   } catch (error) {
@@ -430,218 +529,609 @@ async function getLastInspection(project) {
 }
 
 exports.generateInspect = async (req, res) => {
-    const { id, project } = req.body;
+  const { id, project } = req.body;
 
-    if (req.user && !req.error) {
-        try {
-            if (id.length > 0) {
-                // const lastInspection = await InspectSummary.findOne(
-                //     { deleted: false, report_no: { $regex: new RegExp(`/${project}/`) } },
-                //     {},
-                //     { sort: { createdAt: -1 } }
-                // );
-                const lastInspection = await getLastInspection(project);
-
-                let inspectionNo = lastInspection?.report_no
-                    ? parseInt(lastInspection.report_no.split("/").pop(), 10) + 1
-                    : 1;
-
-                const gen_report_no =
-                    TitleFormat.INSPECTSUMMARY.replace("/PROJECT/", `/${project}/`) +
-                    inspectionNo;
-                const uniqueBatchId = new mongoose.Types.ObjectId();
-                const updateInspect = await InspectSummary.updateMany(
-                    { _id: { $in: id } },
-                    { $set: { is_generate: true, batch_id: uniqueBatchId, report_no: gen_report_no, summary_date: new Date() } },
-                    { new: true }
-                );
-                if (updateInspect.modifiedCount > 0) {
-                    sendResponse(
-                        res,
-                        200,
-                        true,
-                        {},
-                        `Inspect summary generate successfully`
-                    );
-                } else if (updateInspect.matchedCount == 0) {
-                    sendResponse(res, 400, false, {}, `Inspect summary not found`);
-                }
-            } else {
-                return sendResponse(res, 400, false, {}, "Missing parameters");
-            }
-        } catch (error) {
-            console.log(error);
-            sendResponse(res, 500, false, {}, "Something went wrong");
-        }
-    } else {
-        sendResponse(res, 400, false, {}, "Unauthorised");
-    }
-};
-
-const GenerateInspectList = async (project_id, batch_id) => {
+  if (req.user && !req.error) {
     try {
-        let matchObj = { project_id: new ObjectId(project_id) };
+      if (id.length > 0) {
+        const lastInspection = await getLastInspection(project);
 
-        if (batch_id) {
-            matchObj = { ...matchObj, batch_id: new ObjectId(batch_id) };
+        let inspectionNo = lastInspection?.report_no
+          ? parseInt(lastInspection.report_no.split("/").pop(), 10) + 1
+          : 1;
+
+        const gen_report_no =
+          TitleFormat.INSPECTSUMMARY.replace("/PROJECT/", `/${project}/`) + inspectionNo;
+
+        const uniqueBatchId = new mongoose.Types.ObjectId();
+
+        const updateInspect = await InspectSummary.updateMany(
+          { _id: { $in: id } },
+          {
+            $set: {
+              is_generate: true,
+              batch_id: uniqueBatchId,
+              report_no: gen_report_no,
+              summary_date: new Date()
+            }
+          },
+          { new: true }
+        );
+
+        if (updateInspect.modifiedCount > 0) {
+          sendResponse(
+            res,
+            200,
+            true,
+            {},
+            `Inspect summary generated successfully`
+          );
+        } else if (updateInspect.matchedCount == 0) {
+          sendResponse(res, 400, false, {}, `Inspect summary not found`);
         }
-
-        let requestData = await InspectSummary.aggregate([
-            { $match: { deleted: false, is_generate: true } },
-            { $unwind: "$items" },
-            {
-                $lookup: {
-                    from: "erp-planner-drawings",
-                    localField: "items.drawing_id",
-                    foreignField: "_id",
-                    as: "drawingDetails",
-                    pipeline: [
-                        {
-                            $lookup: {
-                                from: "bussiness-projects",
-                                localField: "project",
-                                foreignField: "_id",
-                                as: "projectDetails",
-                                pipeline: [
-                                    {
-                                        $lookup: {
-                                            from: "store-parties",
-                                            localField: "party",
-                                            foreignField: "_id",
-                                            as: "clientDetails",
-                                        },
-                                    },
-                                ],
-                            },
-                        },
-                    ],
-                },
-            },
-            {
-                $lookup: {
-                    from: "erp-drawing-grids",
-                    localField: "items.grid_id",
-                    foreignField: "_id",
-                    as: "gridDetails",
-                },
-            },
-            {
-                $addFields: {
-                    drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
-                    gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
-                },
-            },
-            {
-                $addFields: {
-                    projectDetails: {
-                        $arrayElemAt: ["$drawingDetails.projectDetails", 0],
-                    },
-                },
-            },
-            {
-                $addFields: {
-                    clientDetails: {
-                        $arrayElemAt: ["$projectDetails.clientDetails", 0],
-                    },
-                },
-            },
-            {
-                $project: {
-                    batch_id: 1,
-                    client: "$clientDetails.name",
-                    project_name: "$projectDetails.name",
-                    project_id: "$projectDetails._id",
-                    wo_no: "$projectDetails.work_order_no",
-                    project_po_no: "$projectDetails.work_order_no",
-                    report_no: "$report_no",
-                    summary_date: "$summary_date",
-                    items: {
-                        _id: "$items._id",
-                        main_id: "$_id",
-                        summary_date: "$summary_date",
-                        drawing_no: "$drawingDetails.drawing_no",
-                        drawing_id: "$drawingDetails._id",
-                        rev: "$drawingDetails.rev",
-                        sheet_no: "$drawingDetails.sheet_no",
-                        assembly_no: "$drawingDetails.assembly_no",
-                        assembly_quantity: "$drawingDetails.assembly_quantity",
-                        unit_area: "$drawingDetails.unit",
-                        grid_no: "$gridDetails.grid_no",
-                        grid_id: "$gridDetails._id",
-                        grid_qty: "$gridDetails.grid_qty",
-                        profile: "$itemDetails.name",
-                        is_grid_qty: "$items.is_grid_qty",
-                        moved_next_step: "$items.moved_next_step",
-                        fitup_inspection_report: "$items.fitup_inspection_report",
-                        weld_inspection_report: "$items.weld_inspection_report",
-                        ut_report: "$items.ut_report",
-                        rt_report: "$items.rt_report",
-                        mpt_report: "$items.mpt_report",
-                        lpt_report: "$items.lpt_report",
-                        fd_report: "$items.fd_report",
-                    },
-                },
-            },
-            {
-                $match: matchObj,
-            },
-            {
-                $group: {
-                    _id: {
-                        batch_id: "$batch_id",
-                        project_name: "$project_name",
-                        project_id: "$project_id",
-                        wo_no: "$wo_no",
-                        project_po_no: "$project_po_no",
-                        client: "$client",
-                        report_no: "$report_no",
-                        summary_date: "$summary_date",
-                    },
-                    items: { $push: "$items" },
-                },
-            },
-            {
-                $sort: { "_id.summary_date": -1 }
-            },
-            {
-                $project: {
-                    _id: 0,
-                    batch_id: "$_id.batch_id",
-                    client: "$_id.client",
-                    project_name: "$_id.project_name",
-                    project_id: "$_id.project_id",
-                    wo_no: "$_id.wo_no",
-                    project_po_no: "$_id.project_po_no",
-                    report_no: "$_id.report_no",
-                    summary_date: "$_id.summary_date",
-                    items: 1,
-                },
-            },
-        ]);
-
-        if (requestData.length && requestData.length > 0) {
-            return { status: 1, result: requestData };
-        } else {
-            return { status: 0, result: [] };
-        }
+      } else {
+        return sendResponse(res, 400, false, {}, "Missing parameters");
+      }
     } catch (error) {
-        return { status: 2, result: error };
+      console.error(error);
+      sendResponse(res, 500, false, {}, "Something went wrong");
     }
+  } else {
+    sendResponse(res, 400, false, {}, "Unauthorized");
+  }
 };
+
+
+// const GenerateInspectList = async (project_id, batch_id, page , limit, search) => {
+//     try {
+//         let matchObj = { project_id: new ObjectId(project_id) };
+
+//         if (batch_id) {
+//             matchObj = { ...matchObj, batch_id: new ObjectId(batch_id) };
+//         }
+
+//         page = parseInt(page);
+//         limit = parseInt(limit);
+   
+// // Apply pagination **only if limit is provided**
+
+//         // if (isNaN(page) || page < 1) page = 1;
+//         // if (isNaN(limit) || limit < 1) limit = 20;
+
+//         const skip = (page - 1) * limit;
+
+
+//         let basePipeline = [
+//             { $match: { deleted: false, is_generate: true } },
+//             { $unwind: "$items" },
+//             {
+//                 $lookup: {
+//                     from: "erp-planner-drawings",
+//                     localField: "items.drawing_id",
+//                     foreignField: "_id",
+//                     as: "drawingDetails",
+//                     pipeline: [
+//                         {
+//                             $lookup: {
+//                                 from: "bussiness-projects",
+//                                 localField: "project",
+//                                 foreignField: "_id",
+//                                 as: "projectDetails",
+//                                 pipeline: [
+//                                     {
+//                                         $lookup: {
+//                                             from: "store-parties",
+//                                             localField: "party",
+//                                             foreignField: "_id",
+//                                             as: "clientDetails",
+//                                         },
+//                                     },
+//                                 ],
+//                             },
+//                         },
+//                     ],
+//                 },
+//             },
+//             {
+//                 $lookup: {
+//                     from: "erp-drawing-grids",
+//                     localField: "items.grid_id",
+//                     foreignField: "_id",
+//                     as: "gridDetails",
+//                 },
+//             },
+//             {
+//                 $addFields: {
+//                     drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
+//                     gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
+//                 },
+//             },
+//             {
+//                 $addFields: {
+//                     projectDetails: {
+//                         $arrayElemAt: ["$drawingDetails.projectDetails", 0],
+//                     },
+//                 },
+//             },
+//             {
+//                 $addFields: {
+//                     clientDetails: {
+//                         $arrayElemAt: ["$projectDetails.clientDetails", 0],
+//                     },
+//                 },
+//             },
+//             {
+//                 $project: {
+//                     batch_id: 1,
+//                     client: "$clientDetails.name",
+//                     project_name: "$projectDetails.name",
+//                     project_id: "$projectDetails._id",
+//                     wo_no: "$projectDetails.work_order_no",
+//                     project_po_no: "$projectDetails.work_order_no",
+//                     report_no: "$report_no",
+//                     summary_date: "$summary_date",
+//                     items: {
+//                         _id: "$items._id",
+//                         main_id: "$_id",
+//                         summary_date: "$summary_date",
+//                         drawing_no: "$drawingDetails.drawing_no",
+//                         drawing_id: "$drawingDetails._id",
+//                         rev: "$drawingDetails.rev",
+//                         sheet_no: "$drawingDetails.sheet_no",
+//                         assembly_no: "$drawingDetails.assembly_no",
+//                         assembly_quantity: "$drawingDetails.assembly_quantity",
+//                         unit_area: "$drawingDetails.unit",
+//                         grid_no: "$gridDetails.grid_no",
+//                         grid_id: "$gridDetails._id",
+//                         grid_qty: "$gridDetails.grid_qty",
+//                         profile: "$itemDetails.name",
+//                         is_grid_qty: "$items.is_grid_qty",
+//                         moved_next_step: "$items.moved_next_step",
+//                         fitup_inspection_report: "$items.fitup_inspection_report",
+//                         weld_inspection_report: "$items.weld_inspection_report",
+//                         ut_report: "$items.ut_report",
+//                         rt_report: "$items.rt_report",
+//                         mpt_report: "$items.mpt_report",
+//                         lpt_report: "$items.lpt_report",
+//                         fd_report: "$items.fd_report",
+//                     },
+//                 },
+//             },
+//             // {
+//             //     $match: matchObj,
+//             // },
+//  {
+//     $match: {
+//       ...matchObj,
+//       ...(search && {
+//         $or: [
+//           { report_no: { $regex: search, $options: "i" } },
+//           { "drawingDetails.assembly_no": { $regex: search, $options: "i" } },
+//           {"items.assembly_no" : {$regex:search, $options: "i"}}
+          
+//         ]
+//       })
+//     }
+//   },
+
+//             {
+//                 $group: {
+//                     _id: {
+//                         batch_id: "$batch_id",
+//                         project_name: "$project_name",
+//                         project_id: "$project_id",
+//                         wo_no: "$wo_no",
+//                         project_po_no: "$project_po_no",
+//                         client: "$client",
+//                         report_no: "$report_no",
+//                         summary_date: "$summary_date",
+//                     },
+//                     items: { $push: "$items" },
+//                 },
+//             },
+//             {
+//                 $sort: { "_id.summary_date": -1 },
+//             }
+//         ];
+// if (limit && page) {
+//     basePipeline.push({ $skip: skip }, { $limit: limit });
+// }
+//         // Step 1: Get total count before applying skip/limit
+//         const totalData = await InspectSummary.aggregate([...basePipeline, { $count: "total" }]);
+//         const totalCount = totalData.length > 0 ? totalData[0].total : 0;
+//         const totalPages = Math.ceil(totalCount / limit);
+
+//         // Step 2: Apply pagination
+//         basePipeline.push(
+//             { $skip: skip },
+//             { $limit: limit },
+//             {
+//                 $project: {
+//                     _id: 0,
+//                     batch_id: "$_id.batch_id",
+//                     client: "$_id.client",
+//                     project_name: "$_id.project_name",
+//                     project_id: "$_id.project_id",
+//                     wo_no: "$_id.wo_no",
+//                     project_po_no: "$_id.project_po_no",
+//                     report_no: "$_id.report_no",
+//                     summary_date: "$_id.summary_date",
+//                     items: 1,
+//                 },
+//             }
+//         );
+
+//         const requestData = await InspectSummary.aggregate(basePipeline);
+
+//         return {
+//             status: 1,
+//             result: requestData,
+//             pagination: {
+//                 totalCount,
+//                 totalPages,
+//                 currentPage: page,
+//                 perPage: limit,
+//             },
+//         };
+
+//     } catch (error) {
+//         return { status: 2, result: error };
+//     }
+// };
+
+const GenerateInspectList = async (project_id, batch_id, page, limit, search) => {
+  try {
+    let matchObj = { project_id: new ObjectId(project_id) };
+
+    if (batch_id) {
+      matchObj = { ...matchObj, batch_id: new ObjectId(batch_id) };
+    }
+
+    page = parseInt(page);
+    limit = parseInt(limit);
+
+    const isPagination = !isNaN(page) && page > 0 && !isNaN(limit) && limit > 0;
+    const skip = isPagination ? (page - 1) * limit : 0;
+
+    let basePipeline = [
+      { $match: { deleted: false, is_generate: true } },
+      { $unwind: "$items" },
+      {
+        $lookup: {
+          from: "erp-planner-drawings",
+          localField: "items.drawing_id",
+          foreignField: "_id",
+          as: "drawingDetails",
+          pipeline: [
+            {
+              $lookup: {
+                from: "bussiness-projects",
+                localField: "project",
+                foreignField: "_id",
+                as: "projectDetails",
+                pipeline: [
+                  {
+                    $lookup: {
+                      from: "store-parties",
+                      localField: "party",
+                      foreignField: "_id",
+                      as: "clientDetails",
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      {
+        $lookup: {
+          from: "erp-drawing-grids",
+          localField: "items.grid_id",
+          foreignField: "_id",
+          as: "gridDetails",
+        },
+      },
+      {
+        $addFields: {
+          drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
+          gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
+        },
+      },
+      {
+        $addFields: {
+          projectDetails: { $arrayElemAt: ["$drawingDetails.projectDetails", 0] },
+          clientDetails: { $arrayElemAt: ["$projectDetails.clientDetails", 0] },
+        },
+      },
+      {
+        $project: {
+          batch_id: 1,
+          client: "$clientDetails.name",
+          project_name: "$projectDetails.name",
+          project_id: "$projectDetails._id",
+          wo_no: "$projectDetails.work_order_no",
+          project_po_no: "$projectDetails.work_order_no",
+          report_no: "$report_no",
+          summary_date: "$summary_date",
+          items: {
+            _id: "$items._id",
+            main_id: "$_id",
+            summary_date: "$summary_date",
+            drawing_no: "$drawingDetails.drawing_no",
+            drawing_id: "$drawingDetails._id",
+            rev: "$drawingDetails.rev",
+            sheet_no: "$drawingDetails.sheet_no",
+            assembly_no: "$drawingDetails.assembly_no",
+            assembly_quantity: "$drawingDetails.assembly_quantity",
+            unit_area: "$drawingDetails.unit",
+            grid_no: "$gridDetails.grid_no",
+            grid_id: "$gridDetails._id",
+            grid_qty: "$gridDetails.grid_qty",
+            profile: "$itemDetails.name",
+            is_grid_qty: "$items.is_grid_qty",
+            moved_next_step: "$items.moved_next_step",
+            fitup_inspection_report: "$items.fitup_inspection_report",
+            weld_inspection_report: "$items.weld_inspection_report",
+            ut_report: "$items.ut_report",
+            rt_report: "$items.rt_report",
+            mpt_report: "$items.mpt_report",
+            lpt_report: "$items.lpt_report",
+            fd_report: "$items.fd_report",
+          },
+        },
+      },
+      {
+        $match: {
+          ...matchObj,
+          ...(search && {
+            $or: [
+              { report_no: { $regex: search, $options: "i" } },
+              { "drawingDetails.assembly_no": { $regex: search, $options: "i" } },
+              { "items.assembly_no": { $regex: search, $options: "i" } },
+            ],
+          }),
+        },
+      },
+      {
+        $group: {
+          _id: {
+            batch_id: "$batch_id",
+            project_name: "$project_name",
+            project_id: "$project_id",
+            wo_no: "$wo_no",
+            project_po_no: "$project_po_no",
+            client: "$client",
+            report_no: "$report_no",
+            summary_date: "$summary_date",
+          },
+          items: { $push: "$items" },
+        },
+      },
+      { $sort: { "_id.summary_date": -1 } },
+    ];
+
+    // Step 1: Get total count (before pagination)
+    const totalData = await InspectSummary.aggregate([...basePipeline, { $count: "total" }]);
+    const totalCount = totalData.length > 0 ? totalData[0].total : 0;
+    const totalPages = isPagination ? Math.ceil(totalCount / limit) : 1;
+
+    // Step 2: Apply pagination only if page & limit are valid
+    if (isPagination) {
+      basePipeline.push({ $skip: skip }, { $limit: limit });
+    }
+
+    basePipeline.push({
+      $project: {
+        _id: 0,
+        batch_id: "$_id.batch_id",
+        client: "$_id.client",
+        project_name: "$_id.project_name",
+        project_id: "$_id.project_id",
+        wo_no: "$_id.wo_no",
+        project_po_no: "$_id.project_po_no",
+        report_no: "$_id.report_no",
+        summary_date: "$_id.summary_date",
+        items: 1,
+      },
+    });
+
+    const requestData = await InspectSummary.aggregate(basePipeline);
+
+    return {
+      status: 1,
+      result: requestData,
+      pagination: isPagination
+        ? {
+            totalCount,
+            totalPages,
+            currentPage: page,
+            perPage: limit,
+          }
+        : {
+            totalCount: requestData.length,
+            totalPages: 1,
+            currentPage: null,
+            perPage: null,
+          },
+    };
+  } catch (error) {
+    return { status: 2, result: error.message };
+  }
+};
+
+// const GenerateInspectList = async (project_id, batch_id) => {
+//     try {
+//         let matchObj = { project_id: new ObjectId(project_id) };
+
+//         if (batch_id) {
+//             matchObj = { ...matchObj, batch_id: new ObjectId(batch_id) };
+//         }
+
+//         let requestData = await InspectSummary.aggregate([
+//             { $match: { deleted: false, is_generate: true } },
+//             { $unwind: "$items" },
+//             {
+//                 $lookup: {
+//                     from: "erp-planner-drawings",
+//                     localField: "items.drawing_id",
+//                     foreignField: "_id",
+//                     as: "drawingDetails",
+//                     pipeline: [
+//                         {
+//                             $lookup: {
+//                                 from: "bussiness-projects",
+//                                 localField: "project",
+//                                 foreignField: "_id",
+//                                 as: "projectDetails",
+//                                 pipeline: [
+//                                     {
+//                                         $lookup: {
+//                                             from: "store-parties",
+//                                             localField: "party",
+//                                             foreignField: "_id",
+//                                             as: "clientDetails",
+//                                         },
+//                                     },
+//                                 ],
+//                             },
+//                         },
+//                     ],
+//                 },
+//             },
+//             {
+//                 $lookup: {
+//                     from: "erp-drawing-grids",
+//                     localField: "items.grid_id",
+//                     foreignField: "_id",
+//                     as: "gridDetails",
+//                 },
+//             },
+//             {
+//                 $addFields: {
+//                     drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
+//                     gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
+//                 },
+//             },
+//             {
+//                 $addFields: {
+//                     projectDetails: {
+//                         $arrayElemAt: ["$drawingDetails.projectDetails", 0],
+//                     },
+//                 },
+//             },
+//             {
+//                 $addFields: {
+//                     clientDetails: {
+//                         $arrayElemAt: ["$projectDetails.clientDetails", 0],
+//                     },
+//                 },
+//             },
+//             {
+//                 $project: {
+//                     batch_id: 1,
+//                     client: "$clientDetails.name",
+//                     project_name: "$projectDetails.name",
+//                     project_id: "$projectDetails._id",
+//                     wo_no: "$projectDetails.work_order_no",
+//                     project_po_no: "$projectDetails.work_order_no",
+//                     report_no: "$report_no",
+//                     summary_date: "$summary_date",
+//                     items: {
+//                         _id: "$items._id",
+//                         main_id: "$_id",
+//                         summary_date: "$summary_date",
+//                         drawing_no: "$drawingDetails.drawing_no",
+//                         drawing_id: "$drawingDetails._id",
+//                         rev: "$drawingDetails.rev",
+//                         sheet_no: "$drawingDetails.sheet_no",
+//                         assembly_no: "$drawingDetails.assembly_no",
+//                         assembly_quantity: "$drawingDetails.assembly_quantity",
+//                         unit_area: "$drawingDetails.unit",
+//                         grid_no: "$gridDetails.grid_no",
+//                         grid_id: "$gridDetails._id",
+//                         grid_qty: "$gridDetails.grid_qty",
+//                         profile: "$itemDetails.name",
+//                         is_grid_qty: "$items.is_grid_qty",
+//                         moved_next_step: "$items.moved_next_step",
+//                         fitup_inspection_report: "$items.fitup_inspection_report",
+//                         weld_inspection_report: "$items.weld_inspection_report",
+//                         ut_report: "$items.ut_report",
+//                         rt_report: "$items.rt_report",
+//                         mpt_report: "$items.mpt_report",
+//                         lpt_report: "$items.lpt_report",
+//                         fd_report: "$items.fd_report",
+//                     },
+//                 },
+//             },
+//             {
+//                 $match: matchObj,
+//             },
+//             {
+//                 $group: {
+//                     _id: {
+//                         batch_id: "$batch_id",
+//                         project_name: "$project_name",
+//                         project_id: "$project_id",
+//                         wo_no: "$wo_no",
+//                         project_po_no: "$project_po_no",
+//                         client: "$client",
+//                         report_no: "$report_no",
+//                         summary_date: "$summary_date",
+//                     },
+//                     items: { $push: "$items" },
+//                 },
+//             },
+//             {
+//                 $sort: { "_id.summary_date": -1 }
+//             },
+//             {
+//                 $project: {
+//                     _id: 0,
+//                     batch_id: "$_id.batch_id",
+//                     client: "$_id.client",
+//                     project_name: "$_id.project_name",
+//                     project_id: "$_id.project_id",
+//                     wo_no: "$_id.wo_no",
+//                     project_po_no: "$_id.project_po_no",
+//                     report_no: "$_id.report_no",
+//                     summary_date: "$_id.summary_date",
+//                     items: 1,
+//                 },
+//             },
+//         ]);
+
+//         if (requestData.length && requestData.length > 0) {
+//             return { status: 1, result: requestData };
+//         } else {
+//             return { status: 0, result: [] };
+//         }
+//     } catch (error) {
+//         return { status: 2, result: error };
+//     }
+// };
+
 
 exports.MultiGenerateInspectList = async (req, res) => {
-    const { project_id } = req.body;
+    const { project_id, batch_id, page, limit, search } = req.body;
+
     if (req.user && !req.error) {
         try {
-            const data = await GenerateInspectList(project_id);
-            let requestData = data.result;
-
-            if (data.status === 1) {
-                sendResponse(res, 200, true, requestData, "Inspect summary data found");
-            } else if (data.status === 0) {
+            const data = await GenerateInspectList(project_id, batch_id, page, limit,search);
+            const requestData = data.result;
+ if (data.status === 1) {
+                sendResponse(res, 200, true, {
+                    data: requestData,
+                    pagination: data.pagination
+                }, "Inspect summary data found");
+            }
+            // if (data.status === 1) {
+            //     sendResponse(res, 200, true, requestData, "Inspect summary data found");
+            // } 
+            else if (data.status === 0) {
                 sendResponse(res, 200, false, {}, `Inspect summary data not found`);
             } else if (data.status === 2) {
-                console.log("errr", data.result);
+                console.log("error", data.result);
                 sendResponse(res, 500, false, {}, "Something went wrong");
             }
         } catch (error) {
@@ -652,6 +1142,30 @@ exports.MultiGenerateInspectList = async (req, res) => {
         sendResponse(res, 401, false, {}, "Unauthorized");
     }
 };
+
+// exports.MultiGenerateInspectList = async (req, res) => {
+//     const { project_id } = req.body;
+//     if (req.user && !req.error) {
+//         try {
+//             const data = await GenerateInspectList(project_id);
+//             let requestData = data.result;
+
+//             if (data.status === 1) {
+//                 sendResponse(res, 200, true, requestData, "Inspect summary data found");
+//             } else if (data.status === 0) {
+//                 sendResponse(res, 200, false, {}, `Inspect summary data not found`);
+//             } else if (data.status === 2) {
+//                 console.log("errr", data.result);
+//                 sendResponse(res, 500, false, {}, "Something went wrong");
+//             }
+//         } catch (error) {
+//             console.log("error", error);
+//             sendResponse(res, 500, false, {}, "Something went wrong");
+//         }
+//     } else {
+//         sendResponse(res, 401, false, {}, "Unauthorized");
+//     }
+// };
 
 exports.downloadGenerateInspect = async (req, res) => {
     const { project_id, batch_id } = req.body;

@@ -160,6 +160,106 @@ exports.getDrawingItems = async (req, res) => {
 };
 
 
+// exports.getDrawingMasterData = async (req, res) => {
+//   if (!req.user || req.error) {
+//     return sendResponse(res, 401, false, {}, "Unauthorized");
+//   }
+
+//   try {
+//     const limit = Math.min(parseInt(req.query.limit) || 10, 100);
+//     const page = Math.max(parseInt(req.query.page) || 1, 1);
+  
+
+//     const { id, drawing_id, grid_id } = req.query;
+//     console.log("req.query",req.query );
+//     const { project } = req.body;
+//     console.log("project",req.body);
+//     if (!project) {
+//       return sendResponse(res, 400, false, {}, "Project is required.");
+//     }
+
+//     let filter = { deleted: false };
+//     if (id) filter._id = id;
+//     if (drawing_id) filter.drawing_id = drawing_id;
+//     if (grid_id) filter.grid_id = grid_id;
+
+//     // Step 1: Get drawing_ids that match the project
+//     const drawingIdsMatchingProject = await Draw.find({
+//       deleted: false,
+//       project: project,
+//     }).distinct("_id");
+
+    
+//     if (!drawingIdsMatchingProject.length) {
+//       return sendResponse(res, 404, false, {}, "No drawings found for this project.");
+//     }
+
+   
+//     // Step 2: Filter drawing_ids from DrawingItem
+//     const allDrawingIds = await DrawingItem.distinct("drawing_id", {
+//       ...filter,
+//       drawing_id: { $in: drawingIdsMatchingProject },
+//     });
+
+//     const totalRecords = allDrawingIds.length;
+//     const totalPages = Math.ceil(totalRecords / limit);
+//     const paginatedDrawingIds = allDrawingIds.slice((page - 1) * limit, page * limit);
+
+//     // Step 3: Fetch items for paginated drawing_ids
+//     let drawingItems = await DrawingItem.find({
+//       ...filter,
+//       drawing_id: { $in: paginatedDrawingIds },
+//     })
+//       .populate({
+//         path: "drawing_id",
+//         match: { deleted: false },
+//         populate: {
+//           path: "project",
+//         },
+//       })
+//       .populate("grid_id")
+//       .populate({ path: "item_name", select: "name" })
+//       .populate({ path: "joint_type", select: "name" })
+//       .lean();
+
+//     // Step 4: Group by drawing_id
+//     const groupedData = drawingItems.reduce((acc, item) => {
+//       const drawingId = String(item?.drawing_id?._id) || "Unknown";
+//       if (!acc[drawingId]) {
+//         acc[drawingId] = {
+//           drawing_id: item?.drawing_id?._id,
+//           drawing_no: item?.drawing_id?.drawing_no,
+//           rev: item?.drawing_id?.rev,
+//           sheet_no: item?.drawing_id?.sheet_no,
+//           items: [],
+//         };
+//       }
+//       acc[drawingId].items.push(item);
+//       return acc;
+//     }, {});
+
+//     const result = Object.values(groupedData);
+
+//     return sendResponse(
+//       res,
+//       200,
+//       true,
+//       {
+//         pagination: {
+//           totalRecords,
+//           totalPages,
+//           currentPage: page,
+//           limit,
+//         },
+//         data: result,
+//       },
+//       "Drawing items fetched successfully"
+//     );
+//   } catch (error) {
+//     return sendResponse(res, 500, false, {}, "Something went wrong: " + error.message);
+//   }
+// };
+
 exports.getDrawingMasterData = async (req, res) => {
   if (!req.user || req.error) {
     return sendResponse(res, 401, false, {}, "Unauthorized");
@@ -168,32 +268,42 @@ exports.getDrawingMasterData = async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 10, 100);
     const page = Math.max(parseInt(req.query.page) || 1, 1);
-    const { id, drawing_id, grid_id } = req.query;
-    console.log("req.query",req.query );
+
+    const {
+      id,
+      search
+    } = req.query;
+
     const { project } = req.body;
-    console.log("project",req.body);
+
     if (!project) {
       return sendResponse(res, 400, false, {}, "Project is required.");
     }
 
     let filter = { deleted: false };
     if (id) filter._id = id;
-    if (drawing_id) filter.drawing_id = drawing_id;
-    if (grid_id) filter.grid_id = grid_id;
 
-    // Step 1: Get drawing_ids that match the project
-    const drawingIdsMatchingProject = await Draw.find({
-      deleted: false,
-      project: project,
-    }).distinct("_id");
 
-    
+    // Create regex from search term
+    const searchRegex = search ? new RegExp(search, "i") : null;
+
+    // Step 1: Get drawing IDs matching project and search (drawing_no, assembly_no)
+    const drawingMatchFilter = { deleted: false, project };
+
+    if (searchRegex) {
+      drawingMatchFilter.$or = [
+        { drawing_no: searchRegex },
+        { assembly_no: searchRegex },
+      ];
+    }
+
+    const drawingIdsMatchingProject = await Draw.find(drawingMatchFilter).distinct("_id");
+
     if (!drawingIdsMatchingProject.length) {
       return sendResponse(res, 404, false, {}, "No drawings found for this project.");
     }
 
-   
-    // Step 2: Filter drawing_ids from DrawingItem
+    // Step 2: Get distinct drawing IDs from DrawingItem
     const allDrawingIds = await DrawingItem.distinct("drawing_id", {
       ...filter,
       drawing_id: { $in: drawingIdsMatchingProject },
@@ -203,11 +313,22 @@ exports.getDrawingMasterData = async (req, res) => {
     const totalPages = Math.ceil(totalRecords / limit);
     const paginatedDrawingIds = allDrawingIds.slice((page - 1) * limit, page * limit);
 
-    // Step 3: Fetch items for paginated drawing_ids
-    let drawingItems = await DrawingItem.find({
+    // Step 3: Prepare item-level filter
+    const itemSearchFilter = {
       ...filter,
       drawing_id: { $in: paginatedDrawingIds },
-    })
+    };
+
+    if (searchRegex) {
+      itemSearchFilter.$or = [
+        { section_details: searchRegex },
+        { item_no: searchRegex },
+        // grid_no will be filtered after population
+      ];
+    }
+
+    // Step 4: Query drawing items with populations
+    let drawingItems = await DrawingItem.find(itemSearchFilter)
       .populate({
         path: "drawing_id",
         match: { deleted: false },
@@ -220,7 +341,14 @@ exports.getDrawingMasterData = async (req, res) => {
       .populate({ path: "joint_type", select: "name" })
       .lean();
 
-    // Step 4: Group by drawing_id
+    // Step 5: Post-population filtering for grid_no if search is used
+    if (searchRegex) {
+      drawingItems = drawingItems.filter(item =>
+        searchRegex.test(item?.grid_id?.grid_no || '')
+      );
+    }
+
+    // Step 6: Group items by drawing_id
     const groupedData = drawingItems.reduce((acc, item) => {
       const drawingId = String(item?.drawing_id?._id) || "Unknown";
       if (!acc[drawingId]) {
@@ -237,6 +365,12 @@ exports.getDrawingMasterData = async (req, res) => {
     }, {});
 
     const result = Object.values(groupedData);
+
+    // Optional Debug Logs (remove in production)
+    console.log("Total drawing items after filtering:", drawingItems.length);
+    console.log("Search term:", search);
+    console.log("Regex used:", searchRegex);
+    console.log("Result count:", result.length);
 
     return sendResponse(
       res,
@@ -257,6 +391,8 @@ exports.getDrawingMasterData = async (req, res) => {
     return sendResponse(res, 500, false, {}, "Something went wrong: " + error.message);
   }
 };
+
+
 
 exports.getDrawingMasterDataExcelDownload = async (req, res) => {
  
@@ -483,6 +619,7 @@ worksheet.getCell("U6").value = new Date().toLocaleDateString();
     return sendResponse(res, 500, false, {}, "Failed to export Drawing Master Excel");
   }
 };
+
 
 
 exports.deleteDrawingItem = async (req, res) => {

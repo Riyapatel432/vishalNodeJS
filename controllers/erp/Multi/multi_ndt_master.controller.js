@@ -13,7 +13,8 @@ const path = require("path");
 const { generatePDF } = require("../../../utils/pdfUtils");
 const URI = process.env.PDF_URL;
 const PATH = process.env.PDF_PATH;
-
+const Draw = require("../../../models/erp/planner/draw.model");
+const GridItem = require("../../../models/erp/planner/draw_grid_items.model");
 exports.updateNDTGridBalance = async (req, res) => {
   const { weld_visual_id, items, flag } = req.body;
 
@@ -68,95 +69,338 @@ exports.updateNDTGridBalance = async (req, res) => {
   }
 };
 
+// exports.getNDTInspection = async (req, res) => {
+//   const { id, status, project } = req.query;
+
+//   if (!req.user || req.error) {
+//     return sendResponse(res, 401, false, {}, "Unauthorized");
+//   }
+
+//   try {
+//     const query = { deleted: false };
+//     if (id) query._id = id;
+//     if (status) query.status = status;
+
+//       let result = await NDTInspection.find(query, { deleted: 0, __v: 0 })
+//           .populate("offered_by", "user_name")
+//           .populate("qc_name", "user_name")
+//           .populate({
+//               path: "items",
+//               select: "grid_item_id",
+//               populate: [
+//                   {
+//                       path: "grid_item_id",
+//                       select: "item_name drawing_id item_no item_qty grid_id",
+//                       populate: [
+//                           { path: "item_name", select: "name" },
+//                           { path: "grid_id", select: "grid_no grid_qty" },
+//                           {
+//                               path: "drawing_id",
+//                               select: "drawing_no sheet_no rev assembly_no project assembly_quantity unit",
+//                               populate: {
+//                                   path: "project",
+//                                   select: "name party work_order_no",
+//                                   populate: { path: "party", select: "name" },
+//                               },
+//                           },
+//                       ],
+//                   },
+//                   {
+//                       path: "ndt_requirements",
+//                       select: "name",
+//                   },
+//               ]
+//           })
+//           .populate({
+//               path: "weld_visual_id",
+//               select: "items",
+//               // populate: [
+//               //     { path: "items.joint_type", select: "name" },
+//               //     { path: "items.wps_no", select: "wpsNo weldingProcess" },
+//               // ]
+//           })
+//           .sort({ createdAt: -1 })
+//           .lean();
+
+//     if (result?.length) {
+//       // result = result.map((inspection) => {
+//       //     const fitupItems = inspection.fitup_id?.items || [];
+//       //     inspection.items = inspection.items.map((item) => {
+//       //         const match = fitupItems.find(
+//       //             (fitup) => fitup.grid_item_id?.toString() === item.grid_item_id?._id?.toString()
+//       //         );
+//       //         if (match) {
+//       //             return {
+//       //                 ...item,
+//       //                 joint_type: match.joint_type || [],
+//       //                 wps_no: match.wps_no || null,
+//       //             };
+//       //         }
+//       //         return item;
+//       //     });
+//       //     return inspection;
+//       // });
+
+//       if (project) {
+//         result = result.filter(item =>
+//           item.items.some(i =>
+//             i.grid_item_id?.drawing_id?.project?._id?.toString() === project
+//           )
+//         );
+//       }
+
+//       return sendResponse(res, 200, true, result, "Weld Visual inspection offer list");
+//     }
+
+//     return sendResponse(res, 200, true, [], "Records fetched successfully");
+//   } catch (error) {
+//     sendResponse(res, 500, false, {}, `Something went wrong: ${err}`);
+//   }
+// }
+
 exports.getNDTInspection = async (req, res) => {
-  const { id, status, project } = req.query;
+  const { id, status, project, currentPage, limit } = req.query;
+
+  const searchRaw = Array.isArray(req.query.search)
+    ? req.query.search[0]
+    : req.query.search || "";
+  const search = typeof searchRaw === "string" ? searchRaw.trim() : "";
+
+  const hasPagination = currentPage !== undefined && limit !== undefined;
+  const pageNum = hasPagination ? parseInt(currentPage) || 1 : 1;
+  const limitNum = hasPagination ? parseInt(limit) || 10 : 0;
+  const skip = (pageNum - 1) * limitNum;
 
   if (!req.user || req.error) {
     return sendResponse(res, 401, false, {}, "Unauthorized");
   }
 
   try {
-    const query = { deleted: false };
+    let query = { deleted: false };
     if (id) query._id = id;
     if (status) query.status = status;
 
-      let result = await NDTInspection.find(query, { deleted: 0, __v: 0 })
-          .populate("offered_by", "user_name")
-          .populate("qc_name", "user_name")
-          .populate({
-              path: "items",
-              select: "grid_item_id",
-              populate: [
-                  {
-                      path: "grid_item_id",
-                      select: "item_name drawing_id item_no item_qty grid_id",
-                      populate: [
-                          { path: "item_name", select: "name" },
-                          { path: "grid_id", select: "grid_no grid_qty" },
-                          {
-                              path: "drawing_id",
-                              select: "drawing_no sheet_no rev assembly_no project assembly_quantity unit",
-                              populate: {
-                                  path: "project",
-                                  select: "name party work_order_no",
-                                  populate: { path: "party", select: "name" },
-                              },
-                          },
-                      ],
-                  },
-                  {
-                      path: "ndt_requirements",
-                      select: "name",
-                  },
-              ]
-          })
-          .populate({
-              path: "weld_visual_id",
-              select: "items",
-              // populate: [
-              //     { path: "items.joint_type", select: "name" },
-              //     { path: "items.wps_no", select: "wpsNo weldingProcess" },
-              // ]
-          })
-          .sort({ createdAt: -1 })
-          .lean();
+    // 🎯 Filter by project early
+    if (project) {
+      // Step 1: get all drawings of that project
+      const drawingIds = await Draw.find({
+        deleted: false,
+        project: project,
+      }).distinct("_id");
 
-    if (result?.length) {
-      // result = result.map((inspection) => {
-      //     const fitupItems = inspection.fitup_id?.items || [];
-      //     inspection.items = inspection.items.map((item) => {
-      //         const match = fitupItems.find(
-      //             (fitup) => fitup.grid_item_id?.toString() === item.grid_item_id?._id?.toString()
-      //         );
-      //         if (match) {
-      //             return {
-      //                 ...item,
-      //                 joint_type: match.joint_type || [],
-      //                 wps_no: match.wps_no || null,
-      //             };
-      //         }
-      //         return item;
-      //     });
-      //     return inspection;
-      // });
-
-      if (project) {
-        result = result.filter(item =>
-          item.items.some(i =>
-            i.grid_item_id?.drawing_id?.project?._id?.toString() === project
-          )
-        );
+      if (!drawingIds.length) {
+        return sendResponse(res, 200, true, {
+          data: [],
+          pagination: { total: 0, count: 0, currentPage: pageNum, limit: limitNum },
+        }, "NDT inspection list");
       }
 
-      return sendResponse(res, 200, true, result, "Weld Visual inspection offer list");
+      // Step 2: get all grid items linked to those drawings
+      const gridItemIds = await GridItem.find({
+        deleted: false,
+        drawing_id: { $in: drawingIds },
+      }).distinct("_id");
+
+      if (!gridItemIds.length) {
+        return sendResponse(res, 200, true, {
+          data: [],
+          pagination: { total: 0, count: 0, currentPage: pageNum, limit: limitNum },
+        }, "NDT inspection list");
+      }
+
+      // Step 3: filter NDT inspection items by grid item ids
+      query["items.grid_item_id"] = { $in: gridItemIds };
     }
 
-    return sendResponse(res, 200, true, [], "Records fetched successfully");
-  } catch (error) {
-    sendResponse(res, 500, false, {}, `Something went wrong: ${err}`);
-  }
-}
+    // 🔍 Search logic
+    if (search) {
+      // Find matching drawings by assembly_no or unit
+      const drawingMatch = await Draw.find({
+        $or: [
+          { assembly_no: { $regex: search, $options: "i" } },
+          { unit: { $regex: search, $options: "i" } },
+        ],
+        deleted: false,
+      }).distinct("_id");
 
+      const searchConditions = [
+        { report_no: { $regex: search, $options: "i" } },
+      ];
+
+      if (drawingMatch.length > 0) {
+        const gridItemIds = await GridItem.find({
+          deleted: false,
+          drawing_id: { $in: drawingMatch },
+        }).distinct("_id");
+
+        if (gridItemIds.length > 0) {
+          searchConditions.push({ "items.grid_item_id": { $in: gridItemIds } });
+        }
+      }
+
+      query.$or = searchConditions;
+    }
+
+    // 📊 Count total
+    const totalCount = await NDTInspection.countDocuments(query);
+
+    // 📦 Main query with population
+    let queryExec = NDTInspection.find(query, { deleted: 0, __v: 0 })
+      .populate("offered_by", "user_name")
+      .populate("qc_name", "user_name")
+      .populate({
+        path: "items",
+        select: "grid_item_id ndt_requirements",
+        populate: [
+          {
+            path: "grid_item_id",
+            select: "item_name drawing_id item_no item_qty grid_id",
+            populate: [
+              { path: "item_name", select: "name" },
+              { path: "grid_id", select: "grid_no grid_qty" },
+              {
+                path: "drawing_id",
+                select:
+                  "drawing_no sheet_no rev assembly_no project assembly_quantity unit",
+                populate: {
+                  path: "project",
+                  select: "name party work_order_no",
+                  populate: { path: "party", select: "name" },
+                },
+              },
+            ],
+          },
+          { path: "ndt_requirements", select: "name" },
+        ],
+      })
+      .populate({
+        path: "weld_visual_id",
+        select: "items",
+      })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // 📑 Pagination
+    if (hasPagination) {
+      queryExec = queryExec.skip(skip).limit(limitNum);
+    }
+
+    const result = await queryExec;
+
+    return sendResponse(res, 200, true, {
+      data: result,
+      pagination: {
+        total: totalCount,
+        count: result.length,
+        currentPage: pageNum,
+        limit: limitNum,
+      },
+    }, "NDT inspection list");
+  } catch (error) {
+    console.error("Error in getNDTInspection:", error);
+    sendResponse(res, 500, false, {}, `Something went wrong: ${error.message}`);
+  }
+};
+
+
+
+// exports.getNDTInspection = async (req, res) => {
+//   const { id, status, project, currentPage, limit, search } = req.query;
+
+//   if (!req.user || req.error) {
+//     return sendResponse(res, 401, false, {}, "Unauthorized");
+//   }
+
+//   try {
+//     const query = { deleted: false };
+//     if (id) query._id = id;
+//     if (status) query.status = status;
+
+//     let mongoQuery = NDTInspection.find(query, { deleted: 0, __v: 0 })
+//       .populate("offered_by", "user_name")
+//       .populate("qc_name", "user_name")
+//       .populate({
+//         path: "items",
+//         select: "grid_item_id ndt_requirements",
+//         populate: [
+//           {
+//             path: "grid_item_id",
+//             select: "item_name drawing_id item_no item_qty grid_id",
+//             populate: [
+//               { path: "item_name", select: "name" },
+//               { path: "grid_id", select: "grid_no grid_qty" },
+//               {
+//                 path: "drawing_id",
+//                 select: "drawing_no sheet_no rev assembly_no project assembly_quantity unit",
+//                 populate: {
+//                   path: "project",
+//                   select: "name party work_order_no",
+//                   populate: { path: "party", select: "name" },
+//                 },
+//               },
+//             ],
+//           },
+//           {
+//             path: "ndt_requirements",
+//             select: "name",
+//           },
+//         ],
+//       })
+//       .populate({
+//         path: "weld_visual_id",
+//         select: "items",
+//       })
+//       .sort({ createdAt: -1 })
+//       .lean();
+
+//     let result = await mongoQuery;
+
+//     // Filter by project if provided
+//     if (project) {
+//       result = result.filter(item =>
+//         item.items?.some(i =>
+//           i.grid_item_id?.drawing_id?.project?._id?.toString() === project
+//         )
+//       );
+//     }
+
+//     // Apply search filters (reportNo, unit, assemblyNo)
+//     if (search) {
+//       const searchLower = search.toLowerCase();
+//       result = result.filter(item =>
+//         item.report_no?.toLowerCase().includes(searchLower) ||
+//         item.items?.some(i =>
+//           i.grid_item_id?.drawing_id?.unit?.toLowerCase().includes(searchLower) ||
+//           i.grid_item_id?.drawing_id?.assembly_no?.toLowerCase().includes(searchLower)
+//         )
+//       );
+//     }
+
+//     // Pagination
+//     let paginatedResult = result;
+//     if (currentPage && limit) {
+//       const pageNum = parseInt(currentPage);
+//       const limitNum = parseInt(limit);
+//       const startIndex = (pageNum - 1) * limitNum;
+//       const endIndex = startIndex + limitNum;
+
+//       paginatedResult = result.slice(startIndex, endIndex);
+//     }
+
+//     return sendResponse(res, 200, true, {
+//       data: paginatedResult,
+//       pagination:{
+//         total: result.length,
+//        count: paginatedResult.length,
+//        currentPage,
+//        limit
+//       }
+//     }, "Weld Visual inspection offer list");
+//   } catch (error) {
+//     console.error("Error in getNDTInspection:", error);
+//     sendResponse(res, 500, false, {}, `Something went wrong: ${error.message}`);
+//   }
+// }
 
 async function getLastInspection(project) {
   try {
@@ -202,6 +446,7 @@ async function getLastInspection(project) {
     throw error;
   }
 }
+
 exports.manageNDTInspection = async (req, res) => {
   const { id, weld_visual_id, items, offered_by, project } = req.body;
   if (!req.user || req.error) {

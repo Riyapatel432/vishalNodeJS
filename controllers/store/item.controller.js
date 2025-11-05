@@ -41,29 +41,111 @@ exports.getItem = async (req, res) => {
   }
 };
 
+// exports.getAdminItem = async (req, res) => {
+//   const { is_main, project } = req.query;
+//   if (req.user && !req.error) {
+//     try {
+//       let query = { deleted: false };
+//       if (is_main) {
+//         query.is_main = is_main;
+//       }
+//       if (project) {
+//         query.project = project;
+//       }
+//       const itemData = await Item.find(query, { deleted: 0 })
+//         .populate("unit", "name")
+//         .populate("category", "name")
+//         .populate("location", "name")
+//         .sort({ createdAt: -1 })
+//         .lean();
+//       if (itemData) {
+//         sendResponse(res, 200, true, itemData, "Item List");
+//       } else {
+//         sendResponse(res, 200, true, {}, "Item not found");
+//       }
+//     } catch (err) {
+//       sendResponse(res, 500, false, {}, "Something went wrong");
+//     }
+//   } else {
+//     sendResponse(res, 401, false, {}, "Unauthorised");
+//   }
+// };
+
 exports.getAdminItem = async (req, res) => {
-  const { is_main, project } = req.query;
+  const { is_main, project, currentPage, limit, search } = req.query;
+
   if (req.user && !req.error) {
     try {
       let query = { deleted: false };
-      if (is_main) {
-        query.is_main = is_main;
+
+      if (is_main) query.is_main = is_main;
+      if (project) query.project = project;
+
+      const searchRegex = search ? new RegExp(search, "i") : null;
+
+      if (searchRegex) {
+        // Direct field search
+        query.$or = [
+          { name: searchRegex },
+          { material_grade: searchRegex },
+          { m_code: searchRegex },
+        ];
+
+        // Search in category name (populate-based)
+        const matchedCategories = await ItemCategory.find({ name: searchRegex }, { _id: 1 }).lean();
+        const categoryIds = matchedCategories.map(cat => cat._id);
+
+        if (categoryIds.length > 0) {
+          query.$or.push({ category: { $in: categoryIds } });
+        }
       }
-      if (project) {
-        query.project = project;
-      }
-      const itemData = await Item.find(query, { deleted: 0 })
-        .populate("unit", "name")
-        .populate("category", "name")
-        .populate("location", "name")
-        .sort({ createdAt: -1 })
-        .lean();
-      if (itemData) {
-        sendResponse(res, 200, true, itemData, "Item List");
+
+      let itemData;
+      let total;
+
+      const pageNum = parseInt(currentPage);
+      const limitNum = parseInt(limit);
+
+      const applyPagination = !isNaN(pageNum) && !isNaN(limitNum) && limitNum > 0;
+
+      if (applyPagination) {
+        const skip = (pageNum - 1) * limitNum;
+        total = await Item.countDocuments(query);
+
+        itemData = await Item.find(query, { deleted: 0 })
+          .populate("unit", "name")
+          .populate("category", "name")
+          .populate("location", "name")
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limitNum)
+          .lean();
       } else {
-        sendResponse(res, 200, true, {}, "Item not found");
+        // No pagination or search — return all matching data
+        itemData = await Item.find(query, { deleted: 0 })
+          .populate("unit", "name")
+          .populate("category", "name")
+          .populate("location", "name")
+          .sort({ createdAt: -1 })
+          .lean();
+
+        total = itemData.length;
       }
+
+      const response = {
+        data: itemData,
+        pagination: {
+          currentPage: applyPagination ? pageNum : 1,
+          limit: applyPagination ? limitNum : total,
+          total,
+          totalPages: applyPagination ? Math.ceil(total / limitNum) : 1,
+        
+        },
+      };
+
+      sendResponse(res, 200, true, response, "Item list");
     } catch (err) {
+      console.error("Error in getAdminItem:", err);
       sendResponse(res, 500, false, {}, "Something went wrong");
     }
   } else {

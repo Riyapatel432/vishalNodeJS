@@ -3,6 +3,11 @@ const { Schema } = mongoose;
 const { Status, PaintStatus } = require('../../../utils/enum');
 
 const multiMioSchema = new Schema({
+    project_id: {
+        type: Schema.Types.ObjectId,
+        ref: 'bussiness-projects',
+        required: true,
+    },
     report_no: {
         type: String,
     },
@@ -96,12 +101,12 @@ const multiMioSchema = new Schema({
             drawing_id: {
                 type: Schema.Types.ObjectId,
                 ref: 'erp-planner-drawing',
-                required: true,
+                required: false,
             },
             grid_id: {
                 type: Schema.Types.ObjectId,
                 ref: 'erp-drawing-grid',
-                required: true,
+                required: false,
             },
             dispatch_id: {
                 type: Schema.Types.ObjectId,
@@ -111,8 +116,24 @@ const multiMioSchema = new Schema({
             main_id: {
                 type: Schema.Types.ObjectId,
                 ref: 'multi-erp-mio-inspections',
-                required: true,
+                required: false,
             },
+             item_name:{
+                    type:String,
+                    required:false
+                },
+            drawing_no:{
+                    type:String,
+                    required:false
+                },
+            grid_no:{
+                    type:String,
+                    required: false
+                },
+            dispatch_no:{
+                     type:String,
+                    required: false
+                },
             fc_balance_grid_qty: {
                 type: Number,
                 default: 0
@@ -121,6 +142,14 @@ const multiMioSchema = new Schema({
                 type: Number,
                 default: 0
             },
+              unit_assembly_weight: {
+                    type: Number,
+                    default: 0
+                },
+            total_assembly_weight: {
+                    type: Number,
+                    default: 0
+                },
             moved_next_step: {
                 type: Number,
                 default: 0

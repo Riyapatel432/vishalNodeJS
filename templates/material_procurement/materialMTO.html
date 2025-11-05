@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Material MTO</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+    }
+    th, td {
+      border: 1px solid #000;
+      padding: 6px;
+      font-size: 10px;
+      text-align: center;
+    }
+    .header {
+      font-weight: bold;
+      font-size: 12px;
+      text-align: left;
+    }
+    .title-row td {
+      text-align: center;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    .remarks {
+      height: 60px;
+    }
+    @media print {
+      thead { display: table-header-group; }
+      .page-break { page-break-after: always; }
+    }
+  </style>
+</head>
+<body>
+  <%
+    const itemsPerPage = 8;
+    const totalPages = Math.ceil(mto.items.length / itemsPerPage);
+    for (let page = 0; page < totalPages; page++) {
+      const start = page * itemsPerPage;
+      const end = start + itemsPerPage;
+      const currentItems = mto.items.slice(start, end);
+  %>
+
+  <table>
+    <tr>
+      <td colspan="17">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <img src="<%= logoUrl1 %>" style="max-height: 80px;" />
+          <div style="text-align: center; flex: 1;">
+            <strong style="font-size: 16px;">VISHAL ENTERPRISE & VRISHAL ENGINEERING PRIVATE LIMITED<br/>
+            <span style="font-size: 14px;">GROUP OF COMPANIES</span><br/></strong>
+            <span style="font-size: 13px;">MATERIAL MTO REPORT</span>
+          </div>
+          <img src="<%= logoUrl2 %>" style="max-height: 80px;" />
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td class="header" colspan="4">Client</td>
+      <td colspan="13"><%= mto.project?.name || '--' %></td>
+    </tr>
+     <tr>
+      <td class="header" colspan="4">PROJECT</td>
+      <td colspan="13"><%= mto.project?.name || '--' %></td>
+    </tr>
+    <tr>
+      <td class="header" colspan="4">PO NUMBER</td>
+      <td colspan="13"><%= mto.poNumber || '--' %></td>
+    </tr>
+    <tr>
+      <td class="header" colspan="4">DATE</td>
+      <td colspan="13"><%= new Date(mto.date).toLocaleDateString() %></td>
+    </tr>
+    <tr>
+      <td>Sr No</td>
+      <td>Entry Date</td>
+      <td>Area</td>
+      <td>Item</td>
+      <td>Material Grade</td>
+      <td>GAD Qty</td>
+      <td>Fab Qty</td>
+      <td>Contingency</td>
+      <td>Material Requirement</td>
+      <td>Usable Stock</td>
+      <td>Ordered Qty</td>
+      <td>Balance Qty</td>
+      <td>PR No</td>
+      <td>Rev No</td>
+      <td>Received</td>
+      <td>Balance to Receive</td>
+      <td>Remarks</td>
+    </tr>
+
+    <% currentItems.forEach((it, idx) => { %>
+      <tr>
+        <td><%= start + idx + 1 %></td>
+        <td><%= new Date(it.entryDate).toLocaleDateString() %></td>
+        <td><%= it.areaBuilding?.area || '--' %></td>
+        <td><%= it.item?.name || '--' %></td>
+        <td><%= it.item?.material_grade || '--' %></td>
+        <td><%= it.gadClientQty || 0 %></td>
+        <td><%= it.fabDrawingQty || 0 %></td>
+        <td><%= it.contingency || 0 %></td>
+        <td><%= it.materialRequirement || 0 %></td>
+        <td><%= it.usableStock || 0 %></td>
+        <td><%= it.orderedQty || 0 %></td>
+        <td><%= it.balanceQty || 0 %></td>
+        <td><%= it.prNo || '--' %></td>
+        <td><%= it.rev || 0 %></td>
+        <td><%= it.materail_received || 0 %></td>
+        <td><%= it.balance_to_receive || 0 %></td>
+        <td><%= it.remarks || '' %></td>
+      </tr>
+    <% }) %>
+    <% if (page === totalPages - 1) { %>
+      <tr>
+        <td colspan="17" style="text-align: left; font-size: 8px;">Doc: VE-DOC-45</td>
+      </tr>
+    <% } %>
+
+  </table>
+  <% if (page !== totalPages - 1) { %>
+    <div class="page-break"></div>
+  
+  <% } }%>
+</body>
+</html>

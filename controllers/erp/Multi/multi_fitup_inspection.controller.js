@@ -239,7 +239,7 @@ if (search) {
               { path: "grid_id", select: "grid_no grid_qty" },
               {
                 path: "drawing_id",
-                select: "drawing_no sheet_no rev assembly_no project unit",
+                select: "drawing_no sheet_no rev assembly_no assembly_quantity  project unit",
                 populate: {
                   path: "project",
                   select: "name party work_order_no",

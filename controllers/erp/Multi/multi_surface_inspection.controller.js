@@ -47,11 +47,14 @@ exports.generateSurfaceOffer = async (req, res) => {
     start_time,
     end_time,
     project,
+    project_id,
   } = req.body;
+
+  // console.log('project_id: ', req.body);
 
 const isIrn = req.body.isIrn === 'true' || req.body.isIrn === true;
 const isSurface = req.body.isSurface === 'true' || req.body.isSurface === true;
-console.log("isSurface:", isSurface);
+
   const itemArray = JSON.parse(items);
   const weatherCondition =
     typeof weather_condition !== "undefined" && weather_condition !== null
@@ -90,8 +93,11 @@ console.log("isSurface:", isSurface);
       TitleFormat.SURFACEOFFERNO.replace("/PROJECT/", `/${project}/`) +
       newOfferNo;
 
+      console.log("Start submitting")
+
     const addSurfaceIoffer = await SurfaceInspection.create({
       report_no: gen_voucher_no,
+      project_id,
       offer_date: Date.now(),
       weather_condition: weatherCondition,
       procedure_no,
@@ -118,13 +124,25 @@ console.log("isSurface:", isSurface);
       items: itemArray,
     });
 
+    console.log("addSurfaceIoffer",addSurfaceIoffer)
+
     if (addSurfaceIoffer) {
-      for (const item of itemArray) {
-        const { surface_offer_id } = item;
-        const deleteSurfaceOffer = await SurfaceOfferTable.deleteOne({
-          _id: new ObjectId(surface_offer_id),
-        });
-      }
+      // for (const item of itemArray) {
+      //   const { surface_offer_id } = item;
+      //   const deleteSurfaceOffer = await SurfaceOfferTable.deleteOne({
+      //     _id: new ObjectId(surface_offer_id),
+      //   });
+      // }
+for (const item of itemArray) {
+  // Use surface_offer_id if available, otherwise fallback to item._id
+  const surfaceOfferId = item.surface_offer_id || item._id;
+
+  if (surfaceOfferId && ObjectId.isValid(surfaceOfferId)) {
+    await SurfaceOfferTable.deleteOne({ _id: new ObjectId(surfaceOfferId) });
+  } else {
+    console.warn("Invalid or missing surfaceOfferId for item:", item);
+  }
+}  
       sendResponse(
         res,
         200,
@@ -141,160 +159,243 @@ console.log("isSurface:", isSurface);
 };
 
 exports.getMultiSurfaceInspectionOffer = async (req, res) => {
-  const { project_id, paint_system_id, report_no, dispatch_site, is_accepted } =
-    req.body;
+  const {
+    project_id,
+    paint_system_id,
+    report_no,
+    dispatch_site,
+    is_accepted,
+    search,
+    page,
+    limit,
+  } = req.body;
 
-    console.log("req.body:", req.body);
-  if (req.user && !req.error) {
-    try {
-      let matchObj = {};
+  if (!req.user || req.error) {
+    return sendResponse(res, 401, false, {}, "Unauthorized");
+  }
 
-      if (paint_system_id) {
-        matchObj["paintDetails._id"] = new ObjectId(paint_system_id);
-      }
+  try {
+    let matchObj = {};
 
-      if (report_no) {
-        matchObj["dispatchDetails.report_no"] = report_no;
-      }
+    if (paint_system_id) {
+      matchObj["paintDetails._id"] = new ObjectId(paint_system_id);
+    }
+    if (report_no) {
+      matchObj["dispatchDetails.report_no"] = report_no;
+    }
+    if (dispatch_site) {
+      matchObj["dispatchDetails.dispatch_site"] = dispatch_site;
+    }
+    if (is_accepted) {
+      let acce = JSON.parse(is_accepted);
+      matchObj["items.is_accepted"] = acce;
+    }
 
-      if (dispatch_site) {
-        matchObj["dispatchDetails.dispatch_site"] = dispatch_site;
-      }
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const doPagination = pageNum > 0 && limitNum > 0;
+    const skipNum = doPagination ? (pageNum - 1) * limitNum : 0;
 
-      if (is_accepted) {
-        let acce = JSON.parse(is_accepted);
-        matchObj["items.is_accepted"] = acce;
-      }
+    let pipeline = [
+      { $match: { deleted: false } },
+      { $unwind: "$items" },
 
-      let requestData = await SurfaceInspection.aggregate([
-        { $match: { deleted: false } },
-        { $unwind: "$items" },
-        {
-          $lookup: {
-            from: "erp-planner-drawings",
-            localField: "items.drawing_id",
-            foreignField: "_id",
-            as: "drawingDetails",
-            pipeline: [
-              {
-                $lookup: {
-                  from: "bussiness-projects",
-                  localField: "project",
-                  foreignField: "_id",
-                  as: "projectDetails",
-                  pipeline: [
-                    {
-                      $lookup: {
-                        from: "store-parties",
-                        localField: "party",
-                        foreignField: "_id",
-                        as: "clientDetails",
-                      },
+      // --- Lookups ---
+      {
+        $lookup: {
+          from: "erp-planner-drawings",
+          localField: "items.drawing_id",
+          foreignField: "_id",
+          as: "drawingDetails",
+          pipeline: [
+            {
+              $lookup: {
+                from: "bussiness-projects",
+                localField: "project",
+                foreignField: "_id",
+                as: "projectDetails",
+                pipeline: [
+                  {
+                    $lookup: {
+                      from: "store-parties",
+                      localField: "party",
+                      foreignField: "_id",
+                      as: "clientDetails",
                     },
-                  ],
-                },
+                  },
+                ],
               },
-            ],
-          },
-        },
-        {
-          $lookup: {
-            from: "erp-drawing-grids",
-            localField: "items.grid_id",
-            foreignField: "_id",
-            as: "gridDetails",
-          },
-        },
-        {
-          $lookup: {
-            from: "users",
-            localField: "offered_by",
-            foreignField: "_id",
-            as: "offerDetails",
-          },
-        },
-        {
-          $lookup: {
-            from: "users",
-            localField: "qc_name",
-            foreignField: "_id",
-            as: "qcDetails",
-          },
-        },
-        {
-          $lookup: {
-            from: "procedure_and_specifications",
-            localField: "procedure_no",
-            foreignField: "_id",
-            as: "procedureDetails",
-          },
-        },
-        {
-          $lookup: {
-            from: "painting-systems",
-            localField: "paint_system_id",
-            foreignField: "_id",
-            as: "paintDetails",
-          },
-        },
-        {
-          $lookup: {
-            from: "multi-erp-painting-dispatch-notes",
-            localField: "items.main_id",
-            foreignField: "_id",
-            as: "dispatchDetails",
-          },
-        },
-     
-        {
-          $addFields: {
-            drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
-            gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
-            offerDetails: { $arrayElemAt: ["$offerDetails", 0] },
-            qcDetails: { $arrayElemAt: ["$qcDetails", 0] },
-            procedureDetails: { $arrayElemAt: ["$procedureDetails", 0] },
-            paintDetails: { $arrayElemAt: ["$paintDetails", 0] },
-            dispatchDetails: { $arrayElemAt: ["$dispatchDetails", 0] },
-          },
-        },
-        {
-          $addFields: {
-            projectDetails: {
-              $arrayElemAt: ["$drawingDetails.projectDetails", 0],
             },
-          },
+          ],
         },
-        {
-          $addFields: {
-            clientDetails: {
-              $arrayElemAt: ["$projectDetails.clientDetails", 0],
-            },
-          },
+      },
+      {
+        $lookup: {
+          from: "erp-drawing-grids",
+          localField: "items.grid_id",
+          foreignField: "_id",
+          as: "gridDetails",
         },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "offered_by",
+          foreignField: "_id",
+          as: "offerDetails",
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "qc_name",
+          foreignField: "_id",
+          as: "qcDetails",
+        },
+      },
+      {
+        $lookup: {
+          from: "procedure_and_specifications",
+          localField: "procedure_no",
+          foreignField: "_id",
+          as: "procedureDetails",
+        },
+      },
+      {
+        $lookup: {
+          from: "painting-systems",
+          localField: "paint_system_id",
+          foreignField: "_id",
+          as: "paintDetails",
+        },
+      },
+      {
+        $lookup: {
+          from: "multi-erp-painting-dispatch-notes",
+          localField: "items.main_id",
+          foreignField: "_id",
+          as: "dispatchDetails",
+        },
+      },
 
-        {
-          $match: { "projectDetails._id": new ObjectId(project_id) },
+      // --- Flatten lookups ---
+      {
+        $addFields: {
+          drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
+          gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
+          offerDetails: { $arrayElemAt: ["$offerDetails", 0] },
+          qcDetails: { $arrayElemAt: ["$qcDetails", 0] },
+          procedureDetails: { $arrayElemAt: ["$procedureDetails", 0] },
+          paintDetails: { $arrayElemAt: ["$paintDetails", 0] },
+          dispatchDetails: { $arrayElemAt: ["$dispatchDetails", 0] },
         },
-        {
-          $match: matchObj,
+      },
+      {
+        $addFields: {
+          projectDetails: {
+            $arrayElemAt: ["$drawingDetails.projectDetails", 0],
+          },
+          clientDetails: {
+            $arrayElemAt: ["$drawingDetails.projectDetails.clientDetails", 0],
+          },
         },
-        {
-          $project: {
-            _id: 1,
+      },
+
+      // --- Filters ---
+      { $match: { "projectDetails._id": new ObjectId(project_id) } },
+      { $match: matchObj },
+
+      // --- Project with dispatch details per item ---
+      {
+        $project: {
+          _id: 1,
+          report_no: 1,
+          report_no_two: 1,
+          offer_date: 1,
+          qc_date: 1,
+          original_status: 1,
+          weather_condition: 1,
+          blasting_date: 1,
+          blasting_method: 1,
+          abrasive_type: 1,
+          dust_level: 1,
+          primer_date: 1,
+          time: 1,
+          paint_batch_base: 1,
+          manufacture_date: 1,
+          shelf_life: 1,
+          paint_batch_hardner: 1,
+          actual_surface_profile: 1,
+          salt_test_reading: 1,
+          offer_notes: 1,
+          qc_notes: 1,
+          status: 1,
+          start_time: 1,
+          end_time: 1,
+          createdAt: 1,
+
+          procedure_id: "$procedureDetails._id",
+          procedure_no: "$procedureDetails.vendor_doc_no",
+          offer_name: "$offerDetails.user_name",
+          qc_name: "$qcDetails.user_name",
+          paint_system_no: "$paintDetails.paint_system_no",
+          paint_system_id: "$paintDetails._id",
+              metal_condition: "$metal_condition",
+                                       metal_rust_grade: "$metal_rust_grade",
+          client: "$clientDetails.name",
+          project_name: "$projectDetails.name",
+          wo_no: "$projectDetails.work_order_no",
+          project_po_no: "$projectDetails.work_order_no",
+
+          items: {
+            _id: "$items._id",
+            main_id: "$_id",
+            drawing_id: "$drawingDetails._id",
+            drawing_no: "$drawingDetails.drawing_no",
+            rev: "$drawingDetails.rev",
+            sheet_no: "$drawingDetails.sheet_no",
+            assembly_no: "$drawingDetails.assembly_no",
+            assembly_quantity: "$drawingDetails.assembly_quantity",
+            grid_id: "$gridDetails._id",
+            grid_no: "$gridDetails.grid_no",
+            grid_qty: "$gridDetails.grid_qty",
+            // item_name: "$items.item_name",
+            // drawing_no: "$items.drawing_no",
+            // grid_no: "$items.grid_no",
+            // dispatch_no: "$items.dispatch_no",
+            
+            //  Dispatch details bound correctly
+            dispatch_id: "$dispatchDetails._id",
+            dispatch_report: "$dispatchDetails.report_no",
+            dispatch_site: "$dispatchDetails.dispatch_site",
+            // isSurface: "$dispatchDetails.isSurface",
+            // isMio: "$dispatchDetails.isMio",
+            // isFp: "$dispatchDetails.isFp",
+            // isIrn: "$dispatchDetails.isIrn",
+
+            surface_balance_grid_qty: "$items.surface_balance_grid_qty",
+            surface_used_grid_qty: "$items.surface_used_grid_qty",
+            moved_next_step: "$items.moved_next_step",
+            average_dft_primer: "$items.average_dft_primer",
+            is_accepted: "$items.is_accepted",
+            remarks: "$items.remarks",
+          },
+
+          
+        },
+      },
+
+      // --- Group back by report ---
+      {
+        $group: {
+          _id: {
+            _id: "$_id",
             report_no: "$report_no",
             report_no_two: "$report_no_two",
-            weather_condition: "$weather_condition",
-            procedure_id: "$procedureDetails._id",
-            procedure_no: "$procedureDetails.vendor_doc_no",
             offer_date: "$offer_date",
-            offer_name: "$offerDetails.user_name",
             qc_date: "$qc_date",
-            qc_name: "$qcDetails.user_name",
             original_status: "$original_status",
-            metal_condition: "$metal_condition",
-            metal_rust_grade: "$metal_rust_grade",
-            paint_system_no: "$paintDetails.paint_system_no",
-            paint_system_id: "$paintDetails._id",
+            weather_condition: "$weather_condition",
             blasting_date: "$blasting_date",
             blasting_method: "$blasting_method",
             abrasive_type: "$abrasive_type",
@@ -303,6 +404,8 @@ exports.getMultiSurfaceInspectionOffer = async (req, res) => {
             time: "$time",
             paint_batch_base: "$paint_batch_base",
             manufacture_date: "$manufacture_date",
+            metal_condition: "$metal_condition",
+            metal_rust_grade: "$metal_rust_grade",
             shelf_life: "$shelf_life",
             paint_batch_hardner: "$paint_batch_hardner",
             actual_surface_profile: "$actual_surface_profile",
@@ -312,304 +415,593 @@ exports.getMultiSurfaceInspectionOffer = async (req, res) => {
             status: "$status",
             start_time: "$start_time",
             end_time: "$end_time",
-            client: "$clientDetails.name",
-            project_name: "$projectDetails.name",
-            wo_no: "$projectDetails.work_order_no",
-            project_po_no: "$projectDetails.work_order_no",
-            createdAt: 1,
-            items: {
-              _id: "$items._id",
-              main_id: "$_id",
-              drawing_id: "$drawingDetails._id",
-              drawing_no: "$drawingDetails.drawing_no",
-              rev: "$drawingDetails.rev",
-              sheet_no: "$drawingDetails.sheet_no",
-              assembly_no: "$drawingDetails.assembly_no",
-              assembly_quantity: "$drawingDetails.assembly_quantity",
-              grid_id: "$gridDetails._id",
-              grid_no: "$gridDetails.grid_no",
-              grid_qty: "$gridDetails.grid_qty",
-              dispatch_id: "$dispatchDetails._id",
-              dispatch_report: "$dispatchDetails.report_no",
-              dispatch_site: "$dispatchDetails.dispatch_site",
-              isSurface: "$dispatchDetails.isSurface",
-              isMio: "$dispatchDetails.isMio",
-              isFp: "$dispatchDetails.isFp",
-              isIrn: "$dispatchDetails.isIrn",
-              surface_balance_grid_qty: "$items.surface_balance_grid_qty",
-              surface_used_grid_qty: "$items.surface_used_grid_qty",
-              moved_next_step: "$items.moved_next_step",
-              average_dft_primer: "$items.average_dft_primer",
-              is_accepted: "$items.is_accepted",
-              remarks: "$items.remarks",
-            },
-          },
-        },
-        {
-          $group: {
-            _id: {
-              _id: "$_id",
-              report_no: "$report_no",
-              report_no_two: "$report_no_two",
-              weather_condition: "$weather_condition",
-              procedure_id: "$procedure_id",
-              procedure_no: "$procedure_no",
-              offer_date: "$offer_date",
-              offer_name: "$offer_name",
-              qc_date: "$qc_date",
-              qc_name: "$qc_name",
-              original_status: "$original_status",
-              metal_condition: "$metal_condition",
-              metal_rust_grade: "$metal_rust_grade",
-              paint_system_no: "$paint_system_no",
-              paint_system_id: "$paint_system_id",
-              blasting_date: "$blasting_date",
-              blasting_method: "$blasting_method",
-              abrasive_type: "$abrasive_type",
-              dust_level: "$dust_level",
-              primer_date: "$primer_date",
-              time: "$time",
-              paint_batch_base: "$paint_batch_base",
-              manufacture_date: "$manufacture_date",
-              shelf_life: "$shelf_life",
-              paint_batch_hardner: "$paint_batch_hardner",
-              actual_surface_profile: "$actual_surface_profile",
-              salt_test_reading: "$salt_test_reading",
-              offer_notes: "$offer_notes",
-              qc_notes: "$qc_notes",
-              status: "$status",
-              start_time: "$start_time",
-              end_time: "$end_time",
-              status: "$status",
-              client: "$client",
-              project_name: "$project_name",
-              wo_no: "$wo_no",
-              project_po_no: "$project_po_no",
-              createdAt: "$createdAt",
-            },
-            items: { $push: "$items" },
-          },
-        },
-        {
-          $project: {
-            _id: "$_id._id",
-            report_no: "$_id.report_no",
-            report_no_two: "$_id.report_no_two",
-            weather_condition: "$_id.weather_condition",
-            procedure_id: "$_id.procedure_id",
-            procedure_no: "$_id.procedure_no",
-            offer_date: "$_id.offer_date",
-            offer_name: "$_id.offer_name",
-            qc_date: "$_id.qc_date",
-            qc_name: "$_id.qc_name",
-            original_status: "$_id.original_status",
-            metal_condition: "$_id.metal_condition",
-            metal_rust_grade: "$_id.metal_rust_grade",
-            paint_system_no: "$_id.paint_system_no",
-            paint_system_id: "$_id.paint_system_id",
-            blasting_date: "$_id.blasting_date",
-            blasting_method: "$_id.blasting_method",
-            abrasive_type: "$_id.abrasive_type",
-            dust_level: "$_id.dust_level",
-            primer_date: "$_id.primer_date",
-            time: "$_id.time",
-            paint_batch_base: "$_id.paint_batch_base",
-            manufacture_date: "$_id.manufacture_date",
-            shelf_life: "$_id.shelf_life",
-            paint_batch_hardner: "$_id.paint_batch_hardner",
-            actual_surface_profile: "$_id.actual_surface_profile",
-            salt_test_reading: "$_id.salt_test_reading",
-            offer_notes: "$_id.offer_notes",
-            qc_notes: "$_id.qc_notes",
-            start_time: "$_id.start_time",
-            end_time: "$_id.end_time",
-            status: "$_id.status",
-            client: "$_id.client",
-            project_name: "$_id.project_name",
-            wo_no: "$_id.wo_no",
-            project_po_no: "$_id.project_po_no",
-            items: 1,
-            createdAt: "$_id.createdAt",
-          },
-        },
-        {
-          $sort: { createdAt: -1 },
-        },
-      ]);
+            createdAt: "$createdAt",
 
-      if (requestData.length && requestData.length > 0) {
-        sendResponse(res, 200, true, requestData, `Surface data list`);
-      } else {
-        sendResponse(res, 200, true, [], `Surface data not found`);
+            procedure_id: "$procedure_id",
+            procedure_no: "$procedure_no",
+            offer_name: "$offer_name",
+            qc_name: "$qc_name",
+            paint_system_no: "$paint_system_no",
+            paint_system_id: "$paint_system_id",
+            client: "$client",
+            project_name: "$project_name",
+            wo_no: "$wo_no",
+            project_po_no: "$project_po_no",
+          },
+          items: { $push: "$items" },
+        },
+      },
+      {
+        $project: {
+          _id: "$_id._id",
+          report_no: "$_id.report_no",
+          report_no_two: "$_id.report_no_two",
+          offer_date: "$_id.offer_date",
+          qc_date: "$_id.qc_date",
+          original_status: "$_id.original_status",
+          weather_condition: "$_id.weather_condition",
+          blasting_date: "$_id.blasting_date",
+          blasting_method: "$_id.blasting_method",
+          abrasive_type: "$_id.abrasive_type",
+          dust_level: "$_id.dust_level",
+          primer_date: "$_id.primer_date",
+          time: "$_id.time",
+          paint_batch_base: "$_id.paint_batch_base",
+          manufacture_date: "$_id.manufacture_date",
+          metal_condition: "$_id.metal_condition",
+          metal_rust_grade: "$_id.metal_rust_grade",
+          shelf_life: "$_id.shelf_life",
+          paint_batch_hardner: "$_id.paint_batch_hardner",
+          actual_surface_profile: "$_id.actual_surface_profile",
+          salt_test_reading: "$_id.salt_test_reading",
+          offer_notes: "$_id.offer_notes",
+          qc_notes: "$_id.qc_notes",
+          status: "$_id.status",
+          start_time: "$_id.start_time",
+          end_time: "$_id.end_time",
+          createdAt: "$_id.createdAt",
+
+          procedure_id: "$_id.procedure_id",
+          procedure_no: "$_id.procedure_no",
+          offer_name: "$_id.offer_name",
+          qc_name: "$_id.qc_name",
+          paint_system_no: "$_id.paint_system_no",
+          paint_system_id: "$_id.paint_system_id",
+          client: "$_id.client",
+          project_name: "$_id.project_name",
+          wo_no: "$_id.wo_no",
+          project_po_no: "$_id.project_po_no",
+
+          items: 1,
+        },
       }
-    } catch (error) {
-        console.log("Error in getMultiSurfaceInspectionOffer:", error);
-      sendResponse(res, 500, false, {}, "Something went wrong");
+    ];
+
+    // --- Search filter ---
+    if (search && search.trim() !== "") {
+      const searchRegex = new RegExp(search.trim(), "i");
+      pipeline.splice(pipeline.length - 0, 0, {
+        $match: {
+          $or: [
+            { offer_name: searchRegex },
+            { procedure_no: searchRegex },
+            { report_no: searchRegex },
+            { report_no_two: searchRegex },
+            { "items.dispatch_report": searchRegex },
+          ],
+        },
+      });
     }
-  } else {
-    sendResponse(res, 401, false, {}, "Unauthorized");
+
+    // --- Sort ---
+    pipeline.push({ $sort: { createdAt: -1 } });
+
+    // --- Count total ---
+    const countPipeline = [...pipeline];
+    // Remove $skip and $limit for count if pagination is enabled
+    if (doPagination) {
+      // Remove any skip/limit from countPipeline, but none added yet, so safe here
+    }
+    countPipeline.push({ $count: "total" });
+    const countResult = await SurfaceInspection.aggregate(countPipeline);
+    const total = countResult[0]?.total || 0;
+
+    // --- Pagination ---
+    if (doPagination) {
+      pipeline.push({ $skip: skipNum });
+      pipeline.push({ $limit: limitNum });
+    }
+
+    const requestData = await SurfaceInspection.aggregate(pipeline);
+
+    sendResponse(res, 200, true, {
+      data: requestData,
+      pagination: {
+        total,
+        page: doPagination ? pageNum : 1,
+        limit: doPagination ? limitNum : total,
+      },
+    }, "Surface data list");
+  } catch (error) {
+    console.log("Error in getMultiSurfaceInspectionOffer:", error);
+    sendResponse(res, 500, false, {}, "Something went wrong");
   }
 };
 
+exports.getMultiSurfaceInspectionOfferViewPage = async (req, res) => {
+  const {
+    project_id,
+    paint_system_id,
+    report_no,
+    dispatch_site,
+    is_accepted,
+    search,
+    page,
+    limit,
+  } = req.body;
 
-// exports.getMultiSurfaceInspectionOffer = async (req, res) => {
-//   const { project_id, paint_system_id, report_no, dispatch_site, is_accepted, page,limit } =
-//     req.body;
+  if (!req.user || req.error) {
+    return sendResponse(res, 401, false, {}, "Unauthorized");
+  }
 
-//     console.log("req.body:", req.body);
-//   if (req.user && !req.error) {
-//     try {
-//       let matchObj = {};
+  try {
+    const matchObj = { deleted: false };
+    if (paint_system_id) matchObj.paint_system_id = new ObjectId(paint_system_id);
+    if (report_no) matchObj.report_no = report_no;
+    if (is_accepted !== undefined) matchObj["items.is_accepted"] = JSON.parse(is_accepted);
+ 
+    if (dispatch_site) {
+      matchObj["dispatchDetails.dispatch_site"] = dispatch_site;
+    }
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const doPagination = pageNum > 0 && limitNum > 0;
+    const skipNum = doPagination ? (pageNum - 1) * limitNum : 0;
 
-//       if (paint_system_id) {
-//         matchObj["paintDetails._id"] = new ObjectId(paint_system_id);
-//       }
+    const pipeline = [
+      { $match: matchObj },
 
-//       if (report_no) {
-//         matchObj["dispatchDetails.report_no"] = report_no;
-//       }
+      // Optional: Filter based on project_id via drawing.project (deep lookup)
+      {
+        $lookup: {
+          from: "erp-planner-drawings",
+          localField: "items.drawing_id",
+          foreignField: "_id",
+          as: "drawingDocs"
+        }
+      },
+      {
+        $lookup: {
+          from: "bussiness-projects",
+          localField: "drawingDocs.project",
+          foreignField: "_id",
+          as: "projectDocs"
+        }
+      },
+     ...(project_id
+        ? [{
+            $match: {
+              $or: [
+                { project_id: new ObjectId(project_id) },
+                { "projectDocs._id": new ObjectId(project_id) }
+              ]
+            }
+          }]
+        : []
+      ),
 
-//       if (dispatch_site) {
-//         matchObj["dispatchDetails.dispatch_site"] = dispatch_site;
-//       }
 
-//       if (is_accepted) {
-//         let acce = JSON.parse(is_accepted);
-//         matchObj["items.is_accepted"] = acce;
-//       }
-// const pageNumber = parseInt(page) || 1;
-// const pageSize = parseInt(limit) || 10;
-// const skip = (pageNumber - 1) * pageSize;
+      // Lookups
+      {
+        $lookup: {
+          from: "users",
+          localField: "offered_by",
+          foreignField: "_id",
+          as: "offerDetails"
+        }
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "qc_name",
+          foreignField: "_id",
+          as: "qcDetails"
+        }
+      },
+      {
+        $lookup: {
+          from: "painting-systems",
+          localField: "paint_system_id",
+          foreignField: "_id",
+          as: "paintDetails"
+        }
+      },
 
-//       let requestData = await SurfaceInspection.aggregate([
-//         { $match: { deleted: false } },
-//         { $unwind: "$items" },
-//         {
-//           $lookup: {
-//             from: "erp-planner-drawings",
-//             localField: "items.drawing_id",
-//             foreignField: "_id",
-//             as: "drawingDetails",
-//             pipeline: [
-//               {
-//                 $lookup: {
-//                   from: "bussiness-projects",
-//                   localField: "project",
-//                   foreignField: "_id",
-//                   as: "projectDetails",
-//                   pipeline: [
-//                     {
-//                       $lookup: {
-//                         from: "store-parties",
-//                         localField: "party",
-//                         foreignField: "_id",
-//                         as: "clientDetails",
-//                       },
+      // Enrich items array individually
+      {
+        $unwind: {
+          path: "$items",
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $lookup: {
+          from: "erp-planner-drawings",
+          localField: "items.drawing_id",
+          foreignField: "_id",
+          as: "drawingDetails"
+        }
+      },
+      {
+        $lookup: {
+          from: "erp-drawing-grids",
+          localField: "items.grid_id",
+          foreignField: "_id",
+          as: "gridDetails"
+        }
+      },
+      {
+        $lookup: {
+          from: "multi-erp-painting-dispatch-notes",
+          localField: "items.main_id",
+          foreignField: "_id",
+          as: "dispatchDetails"
+        }
+      },
+      {
+  $lookup: {
+    from: "procedure_and_specifications",
+    localField: "procedure_no",
+    foreignField: "_id",
+    as: "procedureDetails"
+  }
+},
+
+      {
+        $addFields: {
+          // "items.drawing_no": { $arrayElemAt: ["$drawingDetails.drawing_no", 0] },
+           "items.drawing_no": {
+      $cond: {
+        if: { $ifNull: ["$items.drawing_no", false] },
+        then: "$items.drawing_no",
+        else: { $arrayElemAt: ["$drawingDetails.drawing_no", 0] }
+      }
+    },
+           "items.assembly_no": { $arrayElemAt: ["$drawingDetails.assembly_no", 0] },
+           "items.rev": { $arrayElemAt: ["$drawingDetails.rev", 0] },
+          "items.assembly_quantity": { $arrayElemAt: ["$drawingDetails.assembly_quantity", 0] },
+          // "items.grid_no": { $arrayElemAt: ["$gridDetails.grid_no", 0] },
+              "items.grid_no": {
+      $cond: {
+        if: { $ifNull: ["$items.grid_no", false] },
+        then: "$items.grid_no",
+        else: { $arrayElemAt: ["$gridDetails.grid_no", 0] }
+      }
+    },
+           "items.grid_qty": { $arrayElemAt: ["$gridDetails.grid_qty", 0] },
+    //        "items.grid_qty": {
+    //   $cond: {
+    //     if: { $ifNull: ["$items.grid_qty", false] },
+    //     then: "$items.grid_qty",
+    //     else: { $arrayElemAt: ["$gridDetails.grid_qty", 0] }
+    //   }
+    // },
+          "items.dispatch_report": { $arrayElemAt: ["$dispatchDetails.report_no", 0] },
+          "items.dispatch_site": { $arrayElemAt: ["$dispatchDetails.dispatch_site", 0] }
+
+        }
+      },
+      {
+        $group: {
+          _id: "$_id",
+          doc: { $first: "$$ROOT" },
+          items: { $push: "$items" }
+        }
+      },
+
+      
+      {
+        $replaceRoot: {
+          newRoot: {
+            $mergeObjects: ["$doc", { items: "$items" }]
+          }
+        }
+      },
+
+      // Flatten offer, qc, paint system
+      {
+        $addFields: {
+          offer_name: { $arrayElemAt: ["$offerDetails.user_name", 0] },
+          qc_name: { $arrayElemAt: ["$qcDetails.user_name", 0] },
+          paint_system_no: { $arrayElemAt: ["$paintDetails.paint_system_no", 0] },
+           procedure_no: { $arrayElemAt: ["$procedureDetails.vendor_doc_no", 0] },
+    procedure_id: { $arrayElemAt: ["$procedureDetails._id", 0] },
+    procedure_revision: { $arrayElemAt: ["$procedureDetails.revision", 0] }
+        }
+      },
+
+
+
+
+      // Search filter
+      ...(search && search.trim()
+        ? [{
+            $match: {
+              $or: [
+                { offer_name: new RegExp(search.trim(), "i") },
+                { report_no: new RegExp(search.trim(), "i") },
+                { "items.dispatch_report": new RegExp(search.trim(), "i") },
+              ]
+            }
+          }]
+        : []),
+
+      { $sort: { createdAt: -1 } }
+    ];
+
+    // Count
+    const countPipeline = [...pipeline, { $count: "total" }];
+    const countResult = await SurfaceInspection.aggregate(countPipeline);
+    const total = countResult[0]?.total || 0;
+
+    // Pagination
+    if (doPagination) {
+      pipeline.push({ $skip: skipNum }, { $limit: limitNum });
+    }
+
+    const result = await SurfaceInspection.aggregate(pipeline);
+
+    return sendResponse(res, 200, true, {
+      data: result,
+      pagination: {
+        total,
+        page: doPagination ? pageNum : 1,
+        limit: doPagination ? limitNum : total,
+      }
+    }, "Surface inspections with items");
+  } catch (error) {
+    console.error("Error in getMultiSurfaceInspectionOffer:", error);
+    return sendResponse(res, 500, false, {}, "Something went wrong");
+  }
+};
+
+// exports.getMultiSurfaceInspectionOfferStatus = async (req, res) => {
+//   const {
+//     project_id,
+//     paint_system_id,
+//     report_no,
+//     dispatch_site,
+//     is_accepted,
+//     search,
+//     page,
+//     limit,
+//   } = req.body;
+
+//   if (!req.user || req.error) {
+//     return sendResponse(res, 401, false, {}, "Unauthorized");
+//   }
+
+//   try {
+//     // let matchObj = {};
+// let matchObj = {
+//   status: { $ne: 1 } // status NOT EQUAL to 1
+// };
+//     if (paint_system_id) {
+//       matchObj["paintDetails._id"] = new ObjectId(paint_system_id);
+//     }
+//     if (report_no) {
+//       matchObj["dispatchDetails.report_no"] = report_no;
+//     }
+//     if (dispatch_site) {
+//       matchObj["dispatchDetails.dispatch_site"] = dispatch_site;
+//     }
+//     if (is_accepted) {
+//       let acce = JSON.parse(is_accepted);
+//       matchObj["items.is_accepted"] = acce;
+//     }
+
+//     const pageNum = parseInt(page);
+//     const limitNum = parseInt(limit);
+//     const doPagination = pageNum > 0 && limitNum > 0;
+//     const skipNum = doPagination ? (pageNum - 1) * limitNum : 0;
+
+//     let pipeline = [
+//       { $match: { deleted: false } },
+       
+
+
+//       { $unwind: "$items" },
+
+//       // --- Lookups ---
+//       {
+//         $lookup: {
+//           from: "erp-planner-drawings",
+//           localField: "items.drawing_id",
+//           foreignField: "_id",
+//           as: "drawingDetails",
+//           pipeline: [
+//             {
+//               $lookup: {
+//                 from: "bussiness-projects",
+//                 localField: "project",
+//                 foreignField: "_id",
+//                 as: "projectDetails",
+//                 pipeline: [
+//                   {
+//                     $lookup: {
+//                       from: "store-parties",
+//                       localField: "party",
+//                       foreignField: "_id",
+//                       as: "clientDetails",
 //                     },
-//                   ],
-//                 },
+//                   },
+//                 ],
 //               },
-//             ],
-//           },
-//         },
-//         {
-//           $lookup: {
-//             from: "erp-drawing-grids",
-//             localField: "items.grid_id",
-//             foreignField: "_id",
-//             as: "gridDetails",
-//           },
-//         },
-//         {
-//           $lookup: {
-//             from: "users",
-//             localField: "offered_by",
-//             foreignField: "_id",
-//             as: "offerDetails",
-//           },
-//         },
-//         {
-//           $lookup: {
-//             from: "users",
-//             localField: "qc_name",
-//             foreignField: "_id",
-//             as: "qcDetails",
-//           },
-//         },
-//         {
-//           $lookup: {
-//             from: "procedure_and_specifications",
-//             localField: "procedure_no",
-//             foreignField: "_id",
-//             as: "procedureDetails",
-//           },
-//         },
-//         {
-//           $lookup: {
-//             from: "painting-systems",
-//             localField: "paint_system_id",
-//             foreignField: "_id",
-//             as: "paintDetails",
-//           },
-//         },
-//         {
-//           $lookup: {
-//             from: "multi-erp-painting-dispatch-notes",
-//             localField: "items.main_id",
-//             foreignField: "_id",
-//             as: "dispatchDetails",
-//           },
-//         },
-     
-//         {
-//           $addFields: {
-//             drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
-//             gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
-//             offerDetails: { $arrayElemAt: ["$offerDetails", 0] },
-//             qcDetails: { $arrayElemAt: ["$qcDetails", 0] },
-//             procedureDetails: { $arrayElemAt: ["$procedureDetails", 0] },
-//             paintDetails: { $arrayElemAt: ["$paintDetails", 0] },
-//             dispatchDetails: { $arrayElemAt: ["$dispatchDetails", 0] },
-//           },
-//         },
-//         {
-//           $addFields: {
-//             projectDetails: {
-//               $arrayElemAt: ["$drawingDetails.projectDetails", 0],
 //             },
-//           },
+//           ],
 //         },
-//         {
-//           $addFields: {
-//             clientDetails: {
-//               $arrayElemAt: ["$projectDetails.clientDetails", 0],
-//             },
-//           },
+//       },
+//       {
+//         $lookup: {
+//           from: "erp-drawing-grids",
+//           localField: "items.grid_id",
+//           foreignField: "_id",
+//           as: "gridDetails",
 //         },
+//       },
+//       {
+//         $lookup: {
+//           from: "users",
+//           localField: "offered_by",
+//           foreignField: "_id",
+//           as: "offerDetails",
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "users",
+//           localField: "qc_name",
+//           foreignField: "_id",
+//           as: "qcDetails",
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "procedure_and_specifications",
+//           localField: "procedure_no",
+//           foreignField: "_id",
+//           as: "procedureDetails",
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "painting-systems",
+//           localField: "paint_system_id",
+//           foreignField: "_id",
+//           as: "paintDetails",
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "multi-erp-painting-dispatch-notes",
+//           localField: "items.main_id",
+//           foreignField: "_id",
+//           as: "dispatchDetails",
+//         },
+//       },
 
-//         {
-//           $match: { "projectDetails._id": new ObjectId(project_id) },
+//       // --- Flatten lookups ---
+//       {
+//         $addFields: {
+//           drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
+//           gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
+//           offerDetails: { $arrayElemAt: ["$offerDetails", 0] },
+//           qcDetails: { $arrayElemAt: ["$qcDetails", 0] },
+//           procedureDetails: { $arrayElemAt: ["$procedureDetails", 0] },
+//           paintDetails: { $arrayElemAt: ["$paintDetails", 0] },
+//           dispatchDetails: { $arrayElemAt: ["$dispatchDetails", 0] },
 //         },
-//         {
-//           $match: matchObj,
+//       },
+//       {
+//         $addFields: {
+//           projectDetails: {
+//             $arrayElemAt: ["$drawingDetails.projectDetails", 0],
+//           },
+//           clientDetails: {
+//             $arrayElemAt: ["$drawingDetails.projectDetails.clientDetails", 0],
+//           },
 //         },
-//         {
-//           $project: {
-//             _id: 1,
+//       },
+
+//       // --- Filters ---
+//       { $match: { "projectDetails._id": new ObjectId(project_id) } },
+//       { $match: matchObj },
+
+//       // --- Project with dispatch details per item ---
+//       {
+//         $project: {
+//           _id: 1,
+//           report_no: 1,
+//           report_no_two: 1,
+//           offer_date: 1,
+//           qc_date: 1,
+//           original_status: 1,
+//           weather_condition: 1,
+//           blasting_date: 1,
+//           blasting_method: 1,
+//           abrasive_type: 1,
+//           dust_level: 1,
+//           primer_date: 1,
+//           time: 1,
+//           paint_batch_base: 1,
+//           manufacture_date: 1,
+//           shelf_life: 1,
+//           paint_batch_hardner: 1,
+//           actual_surface_profile: 1,
+//           salt_test_reading: 1,
+//           offer_notes: 1,
+//           qc_notes: 1,
+//           status: 1,
+//           start_time: 1,
+//           end_time: 1,
+//           createdAt: 1,
+
+//           procedure_id: "$procedureDetails._id",
+//           procedure_no: "$procedureDetails.vendor_doc_no",
+//           offer_name: "$offerDetails.user_name",
+//           qc_name: "$qcDetails.user_name",
+//           paint_system_no: "$paintDetails.paint_system_no",
+//           paint_system_id: "$paintDetails._id",
+//               metal_condition: "$metal_condition",
+//                                        metal_rust_grade: "$metal_rust_grade",
+//           client: "$clientDetails.name",
+//           project_name: "$projectDetails.name",
+//           wo_no: "$projectDetails.work_order_no",
+//           project_po_no: "$projectDetails.work_order_no",
+
+//           items: {
+//             _id: "$items._id",
+//             main_id: "$_id",
+//             drawing_id: "$drawingDetails._id",
+//             drawing_no: "$drawingDetails.drawing_no",
+//             rev: "$drawingDetails.rev",
+//             sheet_no: "$drawingDetails.sheet_no",
+//             assembly_no: "$drawingDetails.assembly_no",
+//             assembly_quantity: "$drawingDetails.assembly_quantity",
+//             grid_id: "$gridDetails._id",
+//             grid_no: "$gridDetails.grid_no",
+//             grid_qty: "$gridDetails.grid_qty",
+
+//             //  Dispatch details bound correctly
+//             dispatch_id: "$dispatchDetails._id",
+//             dispatch_report: "$dispatchDetails.report_no",
+//             dispatch_site: "$dispatchDetails.dispatch_site",
+//             // isSurface: "$dispatchDetails.isSurface",
+//             // isMio: "$dispatchDetails.isMio",
+//             // isFp: "$dispatchDetails.isFp",
+//             // isIrn: "$dispatchDetails.isIrn",
+
+//             surface_balance_grid_qty: "$items.surface_balance_grid_qty",
+//             surface_used_grid_qty: "$items.surface_used_grid_qty",
+//             moved_next_step: "$items.moved_next_step",
+//             average_dft_primer: "$items.average_dft_primer",
+//             is_accepted: "$items.is_accepted",
+//             remarks: "$items.remarks",
+//           },
+//         },
+//       },
+
+//       // --- Group back by report ---
+//       {
+//         $group: {
+//           _id: {
+//             _id: "$_id",
 //             report_no: "$report_no",
 //             report_no_two: "$report_no_two",
-//             weather_condition: "$weather_condition",
-//             procedure_id: "$procedureDetails._id",
-//             procedure_no: "$procedureDetails.vendor_doc_no",
 //             offer_date: "$offer_date",
-//             offer_name: "$offerDetails.user_name",
 //             qc_date: "$qc_date",
-//             qc_name: "$qcDetails.user_name",
 //             original_status: "$original_status",
-//             metal_condition: "$metal_condition",
-//             metal_rust_grade: "$metal_rust_grade",
-//             paint_system_no: "$paintDetails.paint_system_no",
-//             paint_system_id: "$paintDetails._id",
+//             weather_condition: "$weather_condition",
 //             blasting_date: "$blasting_date",
 //             blasting_method: "$blasting_method",
 //             abrasive_type: "$abrasive_type",
@@ -618,6 +1010,8 @@ exports.getMultiSurfaceInspectionOffer = async (req, res) => {
 //             time: "$time",
 //             paint_batch_base: "$paint_batch_base",
 //             manufacture_date: "$manufacture_date",
+//             metal_condition: "$metal_condition",
+//             metal_rust_grade: "$metal_rust_grade",
 //             shelf_life: "$shelf_life",
 //             paint_batch_hardner: "$paint_batch_hardner",
 //             actual_surface_profile: "$actual_surface_profile",
@@ -627,170 +1021,357 @@ exports.getMultiSurfaceInspectionOffer = async (req, res) => {
 //             status: "$status",
 //             start_time: "$start_time",
 //             end_time: "$end_time",
-//             client: "$clientDetails.name",
-//             project_name: "$projectDetails.name",
-//             wo_no: "$projectDetails.work_order_no",
-//             project_po_no: "$projectDetails.work_order_no",
-//             createdAt: 1,
-//             items: {
-//               _id: "$items._id",
-//               main_id: "$_id",
-//               drawing_id: "$drawingDetails._id",
-//               drawing_no: "$drawingDetails.drawing_no",
-//               rev: "$drawingDetails.rev",
-//               sheet_no: "$drawingDetails.sheet_no",
-//               assembly_no: "$drawingDetails.assembly_no",
-//               assembly_quantity: "$drawingDetails.assembly_quantity",
-//               grid_id: "$gridDetails._id",
-//               grid_no: "$gridDetails.grid_no",
-//               grid_qty: "$gridDetails.grid_qty",
-//               dispatch_id: "$dispatchDetails._id",
-//               dispatch_report: "$dispatchDetails.report_no",
-//               dispatch_site: "$dispatchDetails.dispatch_site",
-//               isSurface: "$dispatchDetails.isSurface",
-//               isMio: "$dispatchDetails.isMio",
-//               isFp: "$dispatchDetails.isFp",
-//               isIrn: "$dispatchDetails.isIrn",
-//               surface_balance_grid_qty: "$items.surface_balance_grid_qty",
-//               surface_used_grid_qty: "$items.surface_used_grid_qty",
-//               moved_next_step: "$items.moved_next_step",
-//               average_dft_primer: "$items.average_dft_primer",
-//               is_accepted: "$items.is_accepted",
-//               remarks: "$items.remarks",
-//             },
-//           },
-//         },
-//         {
-//           $group: {
-//             _id: {
-//               _id: "$_id",
-//               report_no: "$report_no",
-//               report_no_two: "$report_no_two",
-//               weather_condition: "$weather_condition",
-//               procedure_id: "$procedure_id",
-//               procedure_no: "$procedure_no",
-//               offer_date: "$offer_date",
-//               offer_name: "$offer_name",
-//               qc_date: "$qc_date",
-//               qc_name: "$qc_name",
-//               original_status: "$original_status",
-//               metal_condition: "$metal_condition",
-//               metal_rust_grade: "$metal_rust_grade",
-//               paint_system_no: "$paint_system_no",
-//               paint_system_id: "$paint_system_id",
-//               blasting_date: "$blasting_date",
-//               blasting_method: "$blasting_method",
-//               abrasive_type: "$abrasive_type",
-//               dust_level: "$dust_level",
-//               primer_date: "$primer_date",
-//               time: "$time",
-//               paint_batch_base: "$paint_batch_base",
-//               manufacture_date: "$manufacture_date",
-//               shelf_life: "$shelf_life",
-//               paint_batch_hardner: "$paint_batch_hardner",
-//               actual_surface_profile: "$actual_surface_profile",
-//               salt_test_reading: "$salt_test_reading",
-//               offer_notes: "$offer_notes",
-//               qc_notes: "$qc_notes",
-//               status: "$status",
-//               start_time: "$start_time",
-//               end_time: "$end_time",
-//               status: "$status",
-//               client: "$client",
-//               project_name: "$project_name",
-//               wo_no: "$wo_no",
-//               project_po_no: "$project_po_no",
-//               createdAt: "$createdAt",
-//             },
-//             items: { $push: "$items" },
-//           },
-//         },
-//         {
-//           $project: {
-//             _id: "$_id._id",
-//             report_no: "$_id.report_no",
-//             report_no_two: "$_id.report_no_two",
-//             weather_condition: "$_id.weather_condition",
-//             procedure_id: "$_id.procedure_id",
-//             procedure_no: "$_id.procedure_no",
-//             offer_date: "$_id.offer_date",
-//             offer_name: "$_id.offer_name",
-//             qc_date: "$_id.qc_date",
-//             qc_name: "$_id.qc_name",
-//             original_status: "$_id.original_status",
-//             metal_condition: "$_id.metal_condition",
-//             metal_rust_grade: "$_id.metal_rust_grade",
-//             paint_system_no: "$_id.paint_system_no",
-//             paint_system_id: "$_id.paint_system_id",
-//             blasting_date: "$_id.blasting_date",
-//             blasting_method: "$_id.blasting_method",
-//             abrasive_type: "$_id.abrasive_type",
-//             dust_level: "$_id.dust_level",
-//             primer_date: "$_id.primer_date",
-//             time: "$_id.time",
-//             paint_batch_base: "$_id.paint_batch_base",
-//             manufacture_date: "$_id.manufacture_date",
-//             shelf_life: "$_id.shelf_life",
-//             paint_batch_hardner: "$_id.paint_batch_hardner",
-//             actual_surface_profile: "$_id.actual_surface_profile",
-//             salt_test_reading: "$_id.salt_test_reading",
-//             offer_notes: "$_id.offer_notes",
-//             qc_notes: "$_id.qc_notes",
-//             start_time: "$_id.start_time",
-//             end_time: "$_id.end_time",
-//             status: "$_id.status",
-//             client: "$_id.client",
-//             project_name: "$_id.project_name",
-//             wo_no: "$_id.wo_no",
-//             project_po_no: "$_id.project_po_no",
-//             items: 1,
-//             createdAt: "$_id.createdAt",
-//           },
-//         },
-//         // {
-//         //   $sort: { createdAt: -1 },
-//         // },
+//             createdAt: "$createdAt",
 
-//         {
-//   $facet: {
-//     data: [
-//       { $sort: { createdAt: -1 } },
-//       { $skip: skip },
-//       { $limit: pageSize }
-//     ],
-//     totalCount: [
-//       { $count: "count" }
-//     ]
-//   }
+//             procedure_id: "$procedure_id",
+//             procedure_no: "$procedure_no",
+//             offer_name: "$offer_name",
+//             qc_name: "$qc_name",
+//             paint_system_no: "$paint_system_no",
+//             paint_system_id: "$paint_system_id",
+//             client: "$client",
+//             project_name: "$project_name",
+//             wo_no: "$wo_no",
+//             project_po_no: "$project_po_no",
+//           },
+//           items: { $push: "$items" },
+//         },
+//       },
+//       {
+//         $project: {
+//           _id: "$_id._id",
+//           report_no: "$_id.report_no",
+//           report_no_two: "$_id.report_no_two",
+//           offer_date: "$_id.offer_date",
+//           qc_date: "$_id.qc_date",
+//           original_status: "$_id.original_status",
+//           weather_condition: "$_id.weather_condition",
+//           blasting_date: "$_id.blasting_date",
+//           blasting_method: "$_id.blasting_method",
+//           abrasive_type: "$_id.abrasive_type",
+//           dust_level: "$_id.dust_level",
+//           primer_date: "$_id.primer_date",
+//           time: "$_id.time",
+//           paint_batch_base: "$_id.paint_batch_base",
+//           manufacture_date: "$_id.manufacture_date",
+//           metal_condition: "$_id.metal_condition",
+//           metal_rust_grade: "$_id.metal_rust_grade",
+//           shelf_life: "$_id.shelf_life",
+//           paint_batch_hardner: "$_id.paint_batch_hardner",
+//           actual_surface_profile: "$_id.actual_surface_profile",
+//           salt_test_reading: "$_id.salt_test_reading",
+//           offer_notes: "$_id.offer_notes",
+//           qc_notes: "$_id.qc_notes",
+//           status: "$_id.status",
+//           start_time: "$_id.start_time",
+//           end_time: "$_id.end_time",
+//           createdAt: "$_id.createdAt",
+
+//           procedure_id: "$_id.procedure_id",
+//           procedure_no: "$_id.procedure_no",
+//           offer_name: "$_id.offer_name",
+//           qc_name: "$_id.qc_name",
+//           paint_system_no: "$_id.paint_system_no",
+//           paint_system_id: "$_id.paint_system_id",
+//           client: "$_id.client",
+//           project_name: "$_id.project_name",
+//           wo_no: "$_id.wo_no",
+//           project_po_no: "$_id.project_po_no",
+
+//           items: 1,
+//         },
+//       }
+//     ];
+
+//     // --- Search filter ---
+//     if (search && search.trim() !== "") {
+//       const searchRegex = new RegExp(search.trim(), "i");
+//       pipeline.splice(pipeline.length - 0, 0, {
+//        $match: {
+//   $or: [
+//     { report_no: searchRegex },
+//     { report_no_two: searchRegex },
+//     { paint_system_no: searchRegex },
+//     { qc_name: searchRegex },
+//     { offer_name: searchRegex },
+//     { "items.dispatch_report": searchRegex },
+//     { "items.dispatch_site": searchRegex },
+//   ]
 // }
-//       ]);
 
-//       let paginatedResult = requestData[0] || {};
-// let data = paginatedResult.data || [];
-// let totalCount = paginatedResult.totalCount[0]?.count || 0;
-
-// sendResponse(res, 200, true, {
-//   data,
-//   totalCount,
-//   currentPage: pageNumber,
-//   totalPages: Math.ceil(totalCount / pageSize),
-// }, data.length ? "Surface data list" : "Surface data not found");
-
-//       // if (requestData.length && requestData.length > 0) {
-//       //   sendResponse(res, 200, true, requestData, `Surface data list`);
-//       // } else {
-//       //   sendResponse(res, 200, true, [], `Surface data not found`);
-//       // }
-//     } catch (error) {
-//         console.log("Error in getMultiSurfaceInspectionOffer:", error);
-//       sendResponse(res, 500, false, {}, "Something went wrong");
+//       });
 //     }
-//   } else {
-//     sendResponse(res, 401, false, {}, "Unauthorized");
+
+//     // --- Sort ---
+//     pipeline.push({ $sort: { createdAt: -1 } });
+
+//     // --- Count total ---
+//     const countPipeline = [...pipeline];
+//     // Remove $skip and $limit for count if pagination is enabled
+//     if (doPagination) {
+//       // Remove any skip/limit from countPipeline, but none added yet, so safe here
+//     }
+//     countPipeline.push({ $count: "total" });
+//     const countResult = await SurfaceInspection.aggregate(countPipeline);
+//     const total = countResult[0]?.total || 0;
+
+//     // --- Pagination ---
+//     if (doPagination) {
+//       pipeline.push({ $skip: skipNum });
+//       pipeline.push({ $limit: limitNum });
+//     }
+
+//     const requestData = await SurfaceInspection.aggregate(pipeline);
+
+//     sendResponse(res, 200, true, {
+//       data: requestData,
+//       pagination: {
+//         total,
+//         page: doPagination ? pageNum : 1,
+//         limit: doPagination ? limitNum : total,
+//       },
+//     }, "Surface data list");
+//   } catch (error) {
+//     console.log("Error in getMultiSurfaceInspectionOffer:", error);
+//     sendResponse(res, 500, false, {}, "Something went wrong");
 //   }
 // };
 
+exports.getMultiSurfaceInspectionOfferStatus = async (req, res) => {
+  const {
+    project_id,
+    paint_system_id,
+    report_no,
+    dispatch_site,
+    is_accepted,
+    search,
+    page,
+    limit,
+  } = req.body;
 
+  if (!req.user || req.error) {
+    return sendResponse(res, 401, false, {}, "Unauthorized");
+  }
+
+  try {
+    let matchObj = {
+      deleted: false,
+  status: { $ne: 1 } // status NOT EQUAL to 1
+};
+    // const matchObj = { deleted: false };
+    if (paint_system_id) matchObj.paint_system_id = new ObjectId(paint_system_id);
+    if (report_no) matchObj.report_no = report_no;
+    if (is_accepted !== undefined) matchObj["items.is_accepted"] = JSON.parse(is_accepted);
+ if (dispatch_site) {
+      matchObj["dispatchDetails.dispatch_site"] = dispatch_site;
+    }
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const doPagination = pageNum > 0 && limitNum > 0;
+    const skipNum = doPagination ? (pageNum - 1) * limitNum : 0;
+
+    const pipeline = [
+      { $match: matchObj },
+
+      // Optional: Filter based on project_id via drawing.project (deep lookup)
+      {
+        $lookup: {
+          from: "erp-planner-drawings",
+          localField: "items.drawing_id",
+          foreignField: "_id",
+          as: "drawingDocs"
+        }
+      },
+      {
+        $lookup: {
+          from: "bussiness-projects",
+          localField: "drawingDocs.project",
+          foreignField: "_id",
+          as: "projectDocs"
+        }
+      },
+      ...(project_id
+        ? [{
+            $match: {
+              $or: [
+                { project_id: new ObjectId(project_id) },
+                { "projectDocs._id": new ObjectId(project_id) }
+              ]
+            }
+          }]
+        : []
+      ),
+      // Lookups
+      {
+        $lookup: {
+          from: "users",
+          localField: "offered_by",
+          foreignField: "_id",
+          as: "offerDetails"
+        }
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "qc_name",
+          foreignField: "_id",
+          as: "qcDetails"
+        }
+      },
+      {
+        $lookup: {
+          from: "painting-systems",
+          localField: "paint_system_id",
+          foreignField: "_id",
+          as: "paintDetails"
+        }
+      },
+
+      // Enrich items array individually
+      {
+        $unwind: {
+          path: "$items",
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $lookup: {
+          from: "erp-planner-drawings",
+          localField: "items.drawing_id",
+          foreignField: "_id",
+          as: "drawingDetails"
+        }
+      },
+      {
+        $lookup: {
+          from: "erp-drawing-grids",
+          localField: "items.grid_id",
+          foreignField: "_id",
+          as: "gridDetails"
+        }
+      },
+      {
+        $lookup: {
+          from: "multi-erp-painting-dispatch-notes",
+          localField: "items.main_id",
+          foreignField: "_id",
+          as: "dispatchDetails"
+        }
+      },
+      {
+  $lookup: {
+    from: "procedure_and_specifications",
+    localField: "procedure_no",
+    foreignField: "_id",
+    as: "procedureDetails"
+  }
+},
+
+      {
+        $addFields: {
+          // "items.drawing_no": { $arrayElemAt: ["$drawingDetails.drawing_no", 0] },
+           "items.drawing_no": {
+      $cond: {
+        if: { $ifNull: ["$items.drawing_no", false] },
+        then: "$items.drawing_no",
+        else: { $arrayElemAt: ["$drawingDetails.drawing_no", 0] }
+      }
+    },
+          "items.assembly_no": { $arrayElemAt: ["$drawingDetails.assembly_no", 0] },
+          "items.assembly_quantity": { $arrayElemAt: ["$drawingDetails.assembly_quantity", 0] },
+          "items.rev": { $arrayElemAt: ["$drawingDetails.rev", 0] },
+          // "items.grid_no": { $arrayElemAt: ["$gridDetails.grid_no", 0] },
+              "items.grid_no": {
+      $cond: {
+        if: { $ifNull: ["$items.grid_no", false] },
+        then: "$items.grid_no",
+        else: { $arrayElemAt: ["$gridDetails.grid_no", 0] }
+      }
+    },
+      "items.grid_qty": {
+      $cond: {
+        if: { $ifNull: ["$items.grid_qty", false] },
+        then: "$items.grid_qty",
+        else: { $arrayElemAt: ["$gridDetails.grid_qty", 0] }
+      }
+    },
+          "items.dispatch_report": { $arrayElemAt: ["$dispatchDetails.report_no", 0] },
+          "items.dispatch_site": { $arrayElemAt: ["$dispatchDetails.dispatch_site", 0] }
+        }
+      },
+
+      
+      {
+        $group: {
+          _id: "$_id",
+          doc: { $first: "$$ROOT" },
+          items: { $push: "$items" }
+        }
+      },
+      {
+        $replaceRoot: {
+          newRoot: {
+            $mergeObjects: ["$doc", { items: "$items" }]
+          }
+        }
+      },
+
+      // Flatten offer, qc, paint system
+      {
+        $addFields: {
+          offer_name: { $arrayElemAt: ["$offerDetails.user_name", 0] },
+          qc_name: { $arrayElemAt: ["$qcDetails.user_name", 0] },
+          paint_system_no: { $arrayElemAt: ["$paintDetails.paint_system_no", 0] },
+           procedure_no: { $arrayElemAt: ["$procedureDetails.vendor_doc_no", 0] },
+    procedure_id: { $arrayElemAt: ["$procedureDetails._id", 0] },
+    procedure_revision: { $arrayElemAt: ["$procedureDetails.revision", 0] }
+        }
+      },
+
+
+
+
+      // Search filter
+      ...(search && search.trim()
+        ? [{
+            $match: {
+              $or: [
+                { offer_name: new RegExp(search.trim(), "i") },
+                { report_no: new RegExp(search.trim(), "i") },
+                { "items.dispatch_report": new RegExp(search.trim(), "i") },
+              ]
+            }
+          }]
+        : []),
+
+      { $sort: { createdAt: -1 } }
+    ];
+
+    // Count
+    const countPipeline = [...pipeline, { $count: "total" }];
+    const countResult = await SurfaceInspection.aggregate(countPipeline);
+    const total = countResult[0]?.total || 0;
+
+    // Pagination
+    if (doPagination) {
+      pipeline.push({ $skip: skipNum }, { $limit: limitNum });
+    }
+
+    const result = await SurfaceInspection.aggregate(pipeline);
+
+    return sendResponse(res, 200, true, {
+      data: result,
+      pagination: {
+        total,
+        page: doPagination ? pageNum : 1,
+        limit: doPagination ? limitNum : total,
+      }
+    }, "Surface inspections with items");
+  } catch (error) {
+    console.error("Error in getMultiSurfaceInspectionOffer:", error);
+    return sendResponse(res, 500, false, {}, "Something went wrong");
+  }
+};
 
 async function getLastInspection(project) {
   try {
@@ -835,7 +1416,7 @@ async function getLastInspection(project) {
 }
 
 exports.verifySurfaceQcDetails = async (req, res) => {
-  console.log(" Api verifySurface");
+
   const {
     id,
     items,
@@ -940,18 +1521,12 @@ exports.verifySurfaceQcDetails = async (req, res) => {
         } = item;
 
       if (is_accepted === 2) {
-  console.log("surface::: is_accepted is 2, updating dispatch note");
-console.log("itemArray:", itemArray[0]);
-  console.log("surface_used_grid_qty:", surface_used_grid_qty);
-  console.log("dispatch_id:", dispatch_id);
-  console.log("drawing_id:", drawing_id);
-  console.log("grid_id:", grid_id);
+
   if (
     (surfaceInspection.isIrn === "true" || surfaceInspection.isIrn === true) &&
     (surfaceInspection.isSurface === "true" || surfaceInspection.isSurface === true)
   ) {
-    console.log("surfaceInspection.isIrn:", surfaceInspection.isIrn);
-    console.log("surface::: isSurface & isIrn true, generating release note");
+ 
    const usedQty = Number(surface_used_grid_qty) || 0;
       const result = await DispatchNote.updateOne(
             {
@@ -969,15 +1544,14 @@ console.log("itemArray:", itemArray[0]);
     ...item,
     fc_used_grid_qty: surface_used_grid_qty
   }));
-console.log('modifiedItemArray:', modifiedItemArray);
-console.log("fc_used_grid_qty:", surface_used_grid_qty);
+
     const release_note = await addSurfaceReleaseNote({
       itemArray: modifiedItemArray,
       id: result._id,
       isIrn: surfaceInspection.isIrn,
       isSurface: surfaceInspection.isSurface,
     });
-    console.log("Surface:::::::::::::::::Release note added:", release_note);
+   
    
   }
 }
@@ -1020,19 +1594,325 @@ console.log("fc_used_grid_qty:", surface_used_grid_qty);
   }
 };
 
+// const getSurfaceInspectionOfferFunction = async (report_no, report_no_two) => {
+//   try {
+//     let matchObj = { deleted: false };
+//     if (report_no) {
+//       matchObj = { ...matchObj, report_no: report_no };
+//     }
+//     if (report_no_two) {
+//       matchObj = { ...matchObj, report_no_two: report_no_two };
+//     }
+
+//     let requestData = await SurfaceInspection.aggregate([
+//       { $match: matchObj },
+//       { $unwind: "$items" },
+//       {
+//         $lookup: {
+//           from: "erp-planner-drawings",
+//           localField: "items.drawing_id",
+//           foreignField: "_id",
+//           as: "drawingDetails",
+//           pipeline: [
+//             {
+//               $lookup: {
+//                 from: "bussiness-projects",
+//                 localField: "project",
+//                 foreignField: "_id",
+//                 as: "projectDetails",
+//                 pipeline: [
+//                   {
+//                     $lookup: {
+//                       from: "store-parties",
+//                       localField: "party",
+//                       foreignField: "_id",
+//                       as: "clientDetails",
+//                     },
+//                   },
+//                 ],
+//               },
+//             },
+//           ],
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "erp-drawing-grids",
+//           localField: "items.grid_id",
+//           foreignField: "_id",
+//           as: "gridDetails",
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "users",
+//           localField: "offered_by",
+//           foreignField: "_id",
+//           as: "offerDetails",
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "users",
+//           localField: "qc_name",
+//           foreignField: "_id",
+//           as: "qcDetails",
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "procedure_and_specifications",
+//           localField: "procedure_no",
+//           foreignField: "_id",
+//           as: "procedureDetails",
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "painting-systems",
+//           localField: "paint_system_id",
+//           foreignField: "_id",
+//           as: "paintDetails",
+//           pipeline: [
+//             {
+//               $lookup: {
+//                 from: "paint-manufactures",
+//                 localField: "paint_manufacturer",
+//                 foreignField: "_id",
+//                 as: "paintManDetails",
+//               },
+//             },
+//           ],
+//         },
+//       },
+//       {
+//         $lookup: {
+//           from: "multi-erp-painting-dispatch-notes",
+//           localField: "items.main_id",
+//           foreignField: "_id",
+//           as: "dispatchDetails",
+//         },
+//       },
+//       {
+//         $addFields: {
+//           drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
+//           gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
+//           offerDetails: { $arrayElemAt: ["$offerDetails", 0] },
+//           qcDetails: { $arrayElemAt: ["$qcDetails", 0] },
+//           procedureDetails: { $arrayElemAt: ["$procedureDetails", 0] },
+//           paintDetails: { $arrayElemAt: ["$paintDetails", 0] },
+//           dispatchDetails: { $arrayElemAt: ["$dispatchDetails", 0] },
+//         },
+//       },
+      
+//       {
+//         $addFields: {
+//           projectDetails: {
+//             $arrayElemAt: ["$drawingDetails.projectDetails", 0],
+//           },
+//           paintManDetails: {
+//             $arrayElemAt: ["$paintDetails.paintManDetails", 0],
+//           },
+//         },
+//       },
+//       {
+//         $addFields: {
+//           clientDetails: {
+//             $arrayElemAt: ["$projectDetails.clientDetails", 0],
+//           },
+//         },
+//       },
+
+      
+//       {
+//         $project: {
+//           _id: 1,
+//           report_no: report_no ? "$report_no" : "$report_no_two",
+//           weather_condition: "$weather_condition",
+//           procedure_no: "$procedureDetails.vendor_doc_no",
+//           offer_date: "$offer_date",
+//           offer_name: "$offerDetails.user_name",
+//           qc_date: "$qc_date",
+//           qc_name: "$qcDetails.user_name",
+//           original_status: "$original_status",
+//           metal_condition: "$metal_condition",
+//           metal_rust_grade: "$metal_rust_grade",
+//           paint_system_no: "$paintDetails.paint_system_no",
+//           paint_system_id: "$paintDetails._id",
+//           prep_standard: "$paintDetails.surface_preparation",
+//           profile_requirement: "$paintDetails.profile_requirement",
+//           salt_test: "$paintDetails.salt_test",
+//           prime_paint: "$paintDetails.prime_paint",
+//           primer_app_method: "$paintDetails.primer_app_method",
+//           primer_dft_range: "$paintDetails.primer_dft_range",
+//           paint_manufacturer: "$paintManDetails.name",
+//           blasting_date: "$blasting_date",
+//           blasting_method: "$blasting_method",
+//           abrasive_type: "$abrasive_type",
+//           dust_level: "$dust_level",
+//           primer_date: "$primer_date",
+//           time: "$time",
+//           paint_batch_base: "$paint_batch_base",
+//           manufacture_date: "$manufacture_date",
+//           shelf_life: "$shelf_life",
+//           paint_batch_hardner: "$paint_batch_hardner",
+//           actual_surface_profile: "$actual_surface_profile",
+//           salt_test_reading: "$salt_test_reading",
+//           offer_notes: "$offer_notes",
+//           qc_notes: "$qc_notes",
+//           status: "$status",
+//           start_time: "$start_time",
+//           end_time: "$end_time",
+//           client: "$clientDetails.name",
+//           project_name: "$projectDetails.name",
+//           wo_no: "$projectDetails.work_order_no",
+//           project_po_no: "$projectDetails.work_order_no",
+//           items: {
+//             _id: "$items._id",
+//             drawing_no: "$drawingDetails.drawing_no",
+//             rev: "$drawingDetails.rev",
+//             sheet_no: "$drawingDetails.sheet_no",
+//             assembly_no: "$drawingDetails.assembly_no",
+//             assembly_quantity: "$drawingDetails.assembly_quantity",
+//             grid_no: "$gridDetails.grid_no",
+//             grid_qty: "$gridDetails.grid_qty",
+//             surface_used_grid_qty: "$items.surface_used_grid_qty",
+//             remarks: "$items.remarks",
+//             ...(report_no_two && {
+//               average_dft_primer: "$items.average_dft_primer",
+//               accept: {
+//                 $cond: [
+//                   { $eq: ["$items.is_accepted", 2] },
+//                   "ACC",
+//                   {
+//                     $cond: [{ $eq: ["$items.is_accepted", 3] }, "REJ", "--"],
+//                   },
+//                 ],
+//               },
+//             }),
+//           },
+//         },
+//       },
+//       {
+//         $group: {
+//           _id: {
+//             _id: "$_id",
+//             report_no: "$report_no",
+//             weather_condition: "$weather_condition",
+//             procedure_id: "$procedure_id",
+//             procedure_no: "$procedure_no",
+//             offer_date: "$offer_date",
+//             offer_name: "$offer_name",
+//             qc_date: "$qc_date",
+//             qc_name: "$qc_name",
+//             original_status: "$original_status",
+//             metal_condition: "$metal_condition",
+//             metal_rust_grade: "$metal_rust_grade",
+//             paint_system_no: "$paint_system_no",
+//             paint_system_id: "$paint_system_id",
+//             prep_standard: "$prep_standard",
+//             profile_requirement: "$profile_requirement",
+//             salt_test: "$salt_test",
+//             prime_paint: "$prime_paint",
+//             primer_app_method: "$primer_app_method",
+//             primer_dft_range: "$primer_dft_range",
+//             paint_manufacturer: "$paint_manufacturer",
+//             blasting_date: "$blasting_date",
+//             blasting_method: "$blasting_method",
+//             abrasive_type: "$abrasive_type",
+//             dust_level: "$dust_level",
+//             primer_date: "$primer_date",
+//             time: "$time",
+//             paint_batch_base: "$paint_batch_base",
+//             manufacture_date: "$manufacture_date",
+//             shelf_life: "$shelf_life",
+//             paint_batch_hardner: "$paint_batch_hardner",
+//             actual_surface_profile: "$actual_surface_profile",
+//             salt_test_reading: "$salt_test_reading",
+//             offer_notes: "$offer_notes",
+//             qc_notes: "$qc_notes",
+//             status: "$status",
+//             start_time: "$start_time",
+//             end_time: "$end_time",
+//             client: "$client",
+//             project_name: "$project_name",
+//             wo_no: "$wo_no",
+//             project_po_no: "$project_po_no",
+//           },
+//           items: { $push: "$items" },
+//         },
+//       },
+//       {
+//         $project: {
+//           _id: "$_id._id",
+//           report_no: "$_id.report_no",
+//           weather_condition: "$_id.weather_condition",
+//           procedure_id: "$_id.procedure_id",
+//           procedure_no: "$_id.procedure_no",
+//           offer_date: "$_id.offer_date",
+//           offer_name: "$_id.offer_name",
+//           qc_date: "$_id.qc_date",
+//           qc_name: "$_id.qc_name",
+//           original_status: "$_id.original_status",
+//           metal_condition: "$_id.metal_condition",
+//           metal_rust_grade: "$_id.metal_rust_grade",
+//           paint_system_no: "$_id.paint_system_no",
+//           paint_system_id: "$_id.paint_system_id",
+//           prep_standard: "$_id.prep_standard",
+//           profile_requirement: "$_id.profile_requirement",
+//           salt_test: "$_id.salt_test",
+//           prime_paint: "$_id.prime_paint",
+//           primer_app_method: "$_id.primer_app_method",
+//           primer_dft_range: "$_id.primer_dft_range",
+//           paint_manufacturer: "$_id.paint_manufacturer",
+//           blasting_date: "$_id.blasting_date",
+//           blasting_method: "$_id.blasting_method",
+//           abrasive_type: "$_id.abrasive_type",
+//           dust_level: "$_id.dust_level",
+//           primer_date: "$_id.primer_date",
+//           time: "$_id.time",
+//           paint_batch_base: "$_id.paint_batch_base",
+//           manufacture_date: "$_id.manufacture_date",
+//           shelf_life: "$_id.shelf_life",
+//           paint_batch_hardner: "$_id.paint_batch_hardner",
+//           actual_surface_profile: "$_id.actual_surface_profile",
+//           salt_test_reading: "$_id.salt_test_reading",
+//           offer_notes: "$_id.offer_notes",
+//           qc_notes: "$_id.qc_notes",
+//           status: "$_id.status",
+//           start_time: "$_id.start_time",
+//           end_time: "$_id.end_time",
+//           client: "$_id.client",
+//           project_name: "$_id.project_name",
+//           wo_no: "$_id.wo_no",
+//           project_po_no: "$_id.project_po_no",
+//           items: 1,
+//         },
+//       },
+//     ]);
+// console.log("requestdata",requestData[0]);
+//     if (requestData.length && requestData.length > 0) {
+//       return { status: 1, result: requestData };
+//     } else {
+//       return { status: 0, result: [] };
+//     }
+//   } catch (error) {
+//     return { status: 2, result: error };
+//   }
+// };
+
+
 const getSurfaceInspectionOfferFunction = async (report_no, report_no_two) => {
   try {
     let matchObj = { deleted: false };
-    if (report_no) {
-      matchObj = { ...matchObj, report_no: report_no };
-    }
-    if (report_no_two) {
-      matchObj = { ...matchObj, report_no_two: report_no_two };
-    }
+    if (report_no) matchObj.report_no = report_no;
+    if (report_no_two) matchObj.report_no_two = report_no_two;
 
     let requestData = await SurfaceInspection.aggregate([
       { $match: matchObj },
       { $unwind: "$items" },
+
+      // Lookup drawings with nested project and client
       {
         $lookup: {
           from: "erp-planner-drawings",
@@ -1061,6 +1941,8 @@ const getSurfaceInspectionOfferFunction = async (report_no, report_no_two) => {
           ],
         },
       },
+
+      // Lookup grids
       {
         $lookup: {
           from: "erp-drawing-grids",
@@ -1069,6 +1951,8 @@ const getSurfaceInspectionOfferFunction = async (report_no, report_no_two) => {
           as: "gridDetails",
         },
       },
+
+      // Lookup users
       {
         $lookup: {
           from: "users",
@@ -1085,6 +1969,8 @@ const getSurfaceInspectionOfferFunction = async (report_no, report_no_two) => {
           as: "qcDetails",
         },
       },
+
+      // Lookup procedure
       {
         $lookup: {
           from: "procedure_and_specifications",
@@ -1093,6 +1979,8 @@ const getSurfaceInspectionOfferFunction = async (report_no, report_no_two) => {
           as: "procedureDetails",
         },
       },
+
+      // Lookup painting system with manufacturer
       {
         $lookup: {
           from: "painting-systems",
@@ -1111,6 +1999,8 @@ const getSurfaceInspectionOfferFunction = async (report_no, report_no_two) => {
           ],
         },
       },
+
+      // Lookup dispatch
       {
         $lookup: {
           from: "multi-erp-painting-dispatch-notes",
@@ -1119,6 +2009,8 @@ const getSurfaceInspectionOfferFunction = async (report_no, report_no_two) => {
           as: "dispatchDetails",
         },
       },
+
+      // Add first elements from arrays
       {
         $addFields: {
           drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
@@ -1132,197 +2024,101 @@ const getSurfaceInspectionOfferFunction = async (report_no, report_no_two) => {
       },
       {
         $addFields: {
-          projectDetails: {
-            $arrayElemAt: ["$drawingDetails.projectDetails", 0],
-          },
-          paintManDetails: {
-            $arrayElemAt: ["$paintDetails.paintManDetails", 0],
-          },
+          projectDetails: { $arrayElemAt: ["$drawingDetails.projectDetails", 0] },
+          paintManDetails: { $arrayElemAt: ["$paintDetails.paintManDetails", 0] },
+          clientDetails: { $arrayElemAt: ["$projectDetails.clientDetails", 0] },
         },
       },
+
+      // Merge manual fields with lookup fallback & compute accept
       {
         $addFields: {
-          clientDetails: {
-            $arrayElemAt: ["$projectDetails.clientDetails", 0],
+           projectDetails: { $arrayElemAt: ["$drawingDetails.projectDetails", 0] },
+          paintManDetails: { $arrayElemAt: ["$paintDetails.paintManDetails", 0] },
+          clientDetails: { $arrayElemAt: ["$projectDetails.clientDetails", 0] },
+          "items.drawing_no": { $ifNull: ["$items.drawing_no", "$drawingDetails.drawing_no"] },
+          "items.rev": { $ifNull: ["$items.rev", "$drawingDetails.rev", "-"] },
+          "items.sheet_no": { $ifNull: ["$items.sheet_no", "$drawingDetails.sheet_no"] },
+          "items.assembly_no": { $ifNull: ["$items.item_name", "$drawingDetails.assembly_no"] },
+          "items.assembly_quantity": { $ifNull: ["$items.assembly_quantity", "$drawingDetails.assembly_quantity"] },
+          "items.grid_no": { $ifNull: ["$items.grid_no", "$gridDetails.grid_no"] },
+          "items.grid_qty": { $ifNull: ["$items.grid_qty", "$gridDetails.grid_qty"] },
+          "items.surface_used_grid_qty": { $ifNull: ["$items.surface_used_grid_qty", "$items.surface_used_grid_qty"] },
+          "items.dispatch_report": { $ifNull: ["$items.dispatch_report", "$dispatchDetails.report_no"] },
+          "items.dispatch_site": { $ifNull: ["$items.dispatch_site", "$dispatchDetails.dispatch_site"] },
+          "items.average_dft_primer": { $ifNull: ["$items.average_dft_primer", "$items.average_dft_primer"] },
+          "items.accept": {
+            $cond: [
+              { $eq: ["$items.is_accepted", 2] },
+              "ACC",
+              { $cond: [{ $eq: ["$items.is_accepted", 3] }, "REJ", "--"] },
+            ],
           },
         },
       },
-      {
-        $project: {
-          _id: 1,
-          report_no: report_no ? "$report_no" : "$report_no_two",
-          weather_condition: "$weather_condition",
-          procedure_no: "$procedureDetails.vendor_doc_no",
-          offer_date: "$offer_date",
-          offer_name: "$offerDetails.user_name",
-          qc_date: "$qc_date",
-          qc_name: "$qcDetails.user_name",
-          original_status: "$original_status",
-          metal_condition: "$metal_condition",
-          metal_rust_grade: "$metal_rust_grade",
-          paint_system_no: "$paintDetails.paint_system_no",
-          paint_system_id: "$paintDetails._id",
-          prep_standard: "$paintDetails.surface_preparation",
-          profile_requirement: "$paintDetails.profile_requirement",
-          salt_test: "$paintDetails.salt_test",
-          prime_paint: "$paintDetails.prime_paint",
-          primer_app_method: "$paintDetails.primer_app_method",
-          primer_dft_range: "$paintDetails.primer_dft_range",
-          paint_manufacturer: "$paintManDetails.name",
-          blasting_date: "$blasting_date",
-          blasting_method: "$blasting_method",
-          abrasive_type: "$abrasive_type",
-          dust_level: "$dust_level",
-          primer_date: "$primer_date",
-          time: "$time",
-          paint_batch_base: "$paint_batch_base",
-          manufacture_date: "$manufacture_date",
-          shelf_life: "$shelf_life",
-          paint_batch_hardner: "$paint_batch_hardner",
-          actual_surface_profile: "$actual_surface_profile",
-          salt_test_reading: "$salt_test_reading",
-          offer_notes: "$offer_notes",
-          qc_notes: "$qc_notes",
-          status: "$status",
-          start_time: "$start_time",
-          end_time: "$end_time",
-          client: "$clientDetails.name",
-          project_name: "$projectDetails.name",
-          wo_no: "$projectDetails.work_order_no",
-          project_po_no: "$projectDetails.work_order_no",
-          items: {
-            _id: "$items._id",
-            drawing_no: "$drawingDetails.drawing_no",
-            rev: "$drawingDetails.rev",
-            sheet_no: "$drawingDetails.sheet_no",
-            assembly_no: "$drawingDetails.assembly_no",
-            assembly_quantity: "$drawingDetails.assembly_quantity",
-            grid_no: "$gridDetails.grid_no",
-            grid_qty: "$gridDetails.grid_qty",
-            surface_used_grid_qty: "$items.surface_used_grid_qty",
-            remarks: "$items.remarks",
-            ...(report_no_two && {
-              average_dft_primer: "$items.average_dft_primer",
-              accept: {
-                $cond: [
-                  { $eq: ["$items.is_accepted", 2] },
-                  "ACC",
-                  {
-                    $cond: [{ $eq: ["$items.is_accepted", 3] }, "REJ", "--"],
-                  },
-                ],
-              },
-            }),
-          },
-        },
-      },
+
+      // Group items back to report level
       {
         $group: {
-          _id: {
-            _id: "$_id",
-            report_no: "$report_no",
-            weather_condition: "$weather_condition",
-            procedure_id: "$procedure_id",
-            procedure_no: "$procedure_no",
-            offer_date: "$offer_date",
-            offer_name: "$offer_name",
-            qc_date: "$qc_date",
-            qc_name: "$qc_name",
-            original_status: "$original_status",
-            metal_condition: "$metal_condition",
-            metal_rust_grade: "$metal_rust_grade",
-            paint_system_no: "$paint_system_no",
-            paint_system_id: "$paint_system_id",
-            prep_standard: "$prep_standard",
-            profile_requirement: "$profile_requirement",
-            salt_test: "$salt_test",
-            prime_paint: "$prime_paint",
-            primer_app_method: "$primer_app_method",
-            primer_dft_range: "$primer_dft_range",
-            paint_manufacturer: "$paint_manufacturer",
-            blasting_date: "$blasting_date",
-            blasting_method: "$blasting_method",
-            abrasive_type: "$abrasive_type",
-            dust_level: "$dust_level",
-            primer_date: "$primer_date",
-            time: "$time",
-            paint_batch_base: "$paint_batch_base",
-            manufacture_date: "$manufacture_date",
-            shelf_life: "$shelf_life",
-            paint_batch_hardner: "$paint_batch_hardner",
-            actual_surface_profile: "$actual_surface_profile",
-            salt_test_reading: "$salt_test_reading",
-            offer_notes: "$offer_notes",
-            qc_notes: "$qc_notes",
-            status: "$status",
-            start_time: "$start_time",
-            end_time: "$end_time",
-            client: "$client",
-            project_name: "$project_name",
-            wo_no: "$wo_no",
-            project_po_no: "$project_po_no",
-          },
+          _id: "$_id",
+          report_no: { $first: "$report_no" },
+          weather_condition: { $first: "$weather_condition" },
+          procedure_no: { $first: "$procedureDetails.vendor_doc_no" },
+          offer_date: { $first: "$offer_date" },
+          offer_name: { $first: "$offerDetails.user_name" },
+          qc_date: { $first: "$qc_date" },
+          qc_name: { $first: "$qcDetails.user_name" },
+          original_status: { $first: "$original_status" },
+          metal_condition: { $first: "$metal_condition" },
+          metal_rust_grade: { $first: "$metal_rust_grade" },
+          paint_system_no: { $first: "$paintDetails.paint_system_no" },
+          paint_system_id: { $first: "$paintDetails._id" },
+          prep_standard: { $first: "$paintDetails.surface_preparation" },
+          profile_requirement: { $first: "$paintDetails.profile_requirement" },
+          salt_test: { $first: "$paintDetails.salt_test" },
+          prime_paint: { $first: "$paintDetails.prime_paint" },
+          primer_app_method: { $first: "$paintDetails.primer_app_method" },
+          primer_dft_range: { $first: "$paintDetails.primer_dft_range" },
+          paint_manufacturer: { $first: "$paintManDetails.name" },
+          blasting_date: { $first: "$blasting_date" },
+          blasting_method: { $first: "$blasting_method" },
+          abrasive_type: { $first: "$abrasive_type" },
+          dust_level: { $first: "$dust_level" },
+          primer_date: { $first: "$primer_date" },
+          time: { $first: "$time" },
+          paint_batch_base: { $first: "$paint_batch_base" },
+          manufacture_date: { $first: "$manufacture_date" },
+          shelf_life: { $first: "$shelf_life" },
+          paint_batch_hardner: { $first: "$paint_batch_hardner" },
+          actual_surface_profile: { $first: "$actual_surface_profile" },
+          salt_test_reading: { $first: "$salt_test_reading" },
+          offer_notes: { $first: "$offer_notes" },
+          qc_notes: { $first: "$qc_notes" },
+          status: { $first: "$status" },
+          start_time: { $first: "$start_time" },
+          end_time: { $first: "$end_time" },
+          client: { $first: "$clientDetails.name" },
+          project_name: { $first: "$projectDetails.name" },
+          wo_no: { $first: "$projectDetails.work_order_no" },
+          project_po_no: { $first: "$projectDetails.work_order_no" },
           items: { $push: "$items" },
         },
       },
-      {
-        $project: {
-          _id: "$_id._id",
-          report_no: "$_id.report_no",
-          weather_condition: "$_id.weather_condition",
-          procedure_id: "$_id.procedure_id",
-          procedure_no: "$_id.procedure_no",
-          offer_date: "$_id.offer_date",
-          offer_name: "$_id.offer_name",
-          qc_date: "$_id.qc_date",
-          qc_name: "$_id.qc_name",
-          original_status: "$_id.original_status",
-          metal_condition: "$_id.metal_condition",
-          metal_rust_grade: "$_id.metal_rust_grade",
-          paint_system_no: "$_id.paint_system_no",
-          paint_system_id: "$_id.paint_system_id",
-          prep_standard: "$_id.prep_standard",
-          profile_requirement: "$_id.profile_requirement",
-          salt_test: "$_id.salt_test",
-          prime_paint: "$_id.prime_paint",
-          primer_app_method: "$_id.primer_app_method",
-          primer_dft_range: "$_id.primer_dft_range",
-          paint_manufacturer: "$_id.paint_manufacturer",
-          blasting_date: "$_id.blasting_date",
-          blasting_method: "$_id.blasting_method",
-          abrasive_type: "$_id.abrasive_type",
-          dust_level: "$_id.dust_level",
-          primer_date: "$_id.primer_date",
-          time: "$_id.time",
-          paint_batch_base: "$_id.paint_batch_base",
-          manufacture_date: "$_id.manufacture_date",
-          shelf_life: "$_id.shelf_life",
-          paint_batch_hardner: "$_id.paint_batch_hardner",
-          actual_surface_profile: "$_id.actual_surface_profile",
-          salt_test_reading: "$_id.salt_test_reading",
-          offer_notes: "$_id.offer_notes",
-          qc_notes: "$_id.qc_notes",
-          status: "$_id.status",
-          start_time: "$_id.start_time",
-          end_time: "$_id.end_time",
-          client: "$_id.client",
-          project_name: "$_id.project_name",
-          wo_no: "$_id.wo_no",
-          project_po_no: "$_id.project_po_no",
-          items: 1,
-        },
-      },
+
+      { $sort: { createdAt: -1 } },
     ]);
 
-    if (requestData.length && requestData.length > 0) {
+    if (requestData.length > 0) {
       return { status: 1, result: requestData };
     } else {
       return { status: 0, result: [] };
     }
   } catch (error) {
+    console.log(error);
     return { status: 2, result: error };
   }
 };
+
 
 exports.oneSurface = async (req, res) => {
   const { report_no, report_no_two } = req.body;

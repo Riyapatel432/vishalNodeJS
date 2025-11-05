@@ -3,6 +3,7 @@ const { Types: { ObjectId } } = require('mongoose');
 
 const { sendResponse } = require("../helper/response");
 const dailyAttendance = require("../models/payroll/daily.attendance.model");
+const PartyBill = require("../models/payroll/partyBill.model");
 
 exports.getProjects = async (req, res) => {
   if (req.user && !req.error) {
@@ -530,10 +531,37 @@ const projectIncomeExpense = async () => {
     ]);
 
     const mergedMap = new Map();
+    const date = new Date();
+date.setDate(date.getDate() - 1);
+const selectedMonth = date.getMonth() + 1;
+const selectedYear = date.getFullYear();
+
+  
+  const partyBillData = await PartyBill.aggregate([
+  {
+    $match: {
+      deleted: false,
+      $expr: {
+        $and: [
+          { $eq: [{ $month: "$invoice_date" }, selectedMonth] },
+          { $eq: [{ $year: "$invoice_date" }, selectedYear] }
+        ]
+      }
+    }
+  },
+  {
+    $group: {
+      _id: "$project_id",
+      total_party_bill_expense: {
+        $sum: { $ifNull: ["$amount_with_gst", 0] }
+      }
+    }
+  }
+]);
 
     requestData.forEach(item => {
       const key = `${item.project_id}_${item.project_name}`;
-      mergedMap.set(key, { ...item, project_salary_expense: 0 });
+      mergedMap.set(key, { ...item, project_salary_expense: 0,party_bill_expense:0 });
     });
 
     requestData1.forEach(item => {
@@ -545,6 +573,19 @@ const projectIncomeExpense = async () => {
       }
     });
 
+
+    const partyBillMap = new Map();
+partyBillData.forEach(item => {
+  partyBillMap.set(String(item._id), item.total_party_bill_expense);
+});
+for (const [key, value] of mergedMap.entries()) {
+  const partyExpense = partyBillMap.get(String(value.project_id)) || 0;
+
+  mergedMap.set(key, {
+    ...value,
+    party_bill_expense: partyExpense,
+  });
+}
     const mergedData = Array.from(mergedMap.values());
 
 
@@ -581,9 +622,13 @@ exports.getProjectIncomeExpense = async (req, res) => {
   }
 };
 
-const projectCurruentMonth = async (year_id) => {
-  try {
 
+const projectCurruentMonth = async (year_id,month,year) => {
+  try {
+  const selectedMonth = parseInt(month) || new Date().getMonth() + 1;
+   const selectedYear = parseInt(year) || new Date().getFullYear();
+
+   
     const requestData = await Project.aggregate([
       {
         $match: { deleted: false },
@@ -609,8 +654,8 @@ const projectCurruentMonth = async (year_id) => {
                       $expr: {
                         $and: [
                           { $eq: ["$requestId", "$$requestId"] },
-                          { $eq: [{ $month: "$received_date" }, { $month: "$$NOW" }] },
-                          { $eq: [{ $year: "$received_date" }, { $year: "$$NOW" }] }
+                          { $eq: [{ $month: "$received_date" }, selectedMonth] },
+                          { $eq: [{ $year: "$received_date" }, selectedYear] }
                         ]
                       },
                       deleted: false
@@ -911,9 +956,37 @@ const projectCurruentMonth = async (year_id) => {
 
     const mergedMap = new Map();
 
+        const date = new Date();
+date.setDate(date.getDate() - 1);
+// const selectedMonth = date.getMonth() + 1;
+// const selectedYear = date.getFullYear();
+
+  
+  const partyBillData = await PartyBill.aggregate([
+  {
+    $match: {
+      deleted: false,
+      $expr: {
+        $and: [
+          { $eq: [{ $month: "$invoice_date" }, selectedMonth] },
+          { $eq: [{ $year: "$invoice_date" }, selectedYear] }
+        ]
+      }
+    }
+  },
+  {
+    $group: {
+      _id: "$project_id",
+      total_party_bill_expense: {
+        $sum: { $ifNull: ["$amount_with_gst", 0] }
+      }
+    }
+  }
+]);
+
     requestData.forEach(item => {
       const key = `${item.project_id}_${item.project_name}`;
-      mergedMap.set(key, { ...item, project_salary_expense: 0 });
+      mergedMap.set(key, { ...item, project_salary_expense: 0,party_bill_expense:0 });
     });
 
     requestData1.forEach(item => {
@@ -924,6 +997,25 @@ const projectCurruentMonth = async (year_id) => {
         mergedMap.set(key, { ...item, some_other_field: 0 });
       }
     });
+
+
+        const partyBillMap = new Map();
+partyBillData.forEach(item => {
+  partyBillMap.set(String(item._id), item.total_party_bill_expense);
+  
+});
+for (const [key, value] of mergedMap.entries()) {
+  const pid = String(value.project_id);
+  const partyExpense = partyBillMap.get(pid) || 0;
+
+  mergedMap.set(key, {
+    ...value,
+    party_bill_expense: partyExpense,
+  });
+}
+
+
+
 
     const mergedData = Array.from(mergedMap.values());
 
@@ -940,19 +1032,15 @@ const projectCurruentMonth = async (year_id) => {
 };
 
 exports.getProjectCurruentMonth = async (req, res) => {
-  const { year_id } = req.body
+  const { year_id, month,year } = req.body;
+
   if (req.user && !req.error) {
     try {
-      const data = await projectCurruentMonth(year_id);
-      let requestData = data.result;
-
+      const data = await projectCurruentMonth(year_id, month,year);
       if (data.status === 1) {
-        sendResponse(res, 200, true, requestData, `Project income expense data list`);
-      } else if (data.status === 0) {
-        sendResponse(res, 200, true, [], `Project income expense data not found`);
-      } else if (data.status === 2) {
-        console.log("errrrrr", data.result)
-        sendResponse(res, 500, false, {}, "Something went wrong11");
+        sendResponse(res, 200, true, data.result, "Project income expense data list");
+      } else {
+        sendResponse(res, 200, true, [], "Project income expense data not found");
       }
     } catch (error) {
       sendResponse(res, 500, false, {}, "Something went wrong");
@@ -961,6 +1049,30 @@ exports.getProjectCurruentMonth = async (req, res) => {
     sendResponse(res, 401, false, {}, "Unauthorized");
   }
 };
+
+// exports.getProjectCurruentMonth = async (req, res) => {
+//   const { year_id } = req.body
+//   if (req.user && !req.error) {
+//     try {
+//       const data = await projectCurruentMonth(year_id);
+//       let requestData = data.result;
+
+//       if (data.status === 1) {
+//         sendResponse(res, 200, true, requestData, `Project income expense data list`);
+//       } else if (data.status === 0) {
+//         sendResponse(res, 200, true, [], `Project income expense data not found`);
+//       } else if (data.status === 2) {
+//         console.log("errrrrr", data.result)
+//         sendResponse(res, 500, false, {}, "Something went wrong11");
+//       }
+//     } catch (error) {
+//       sendResponse(res, 500, false, {}, "Something went wrong");
+//     }
+//   } else {
+//     sendResponse(res, 401, false, {}, "Unauthorized");
+//   }
+// };
+
 
 const projectLastDate = async (year_id) => {
   try {
@@ -1307,11 +1419,13 @@ const projectLastDate = async (year_id) => {
       }
     ]);
 
+
+
     const mergedMap = new Map();
 
     requestData.forEach(item => {
       const key = `${item.project_id}_${item.project_name}`;
-      mergedMap.set(key, { ...item, project_salary_expense: 0 });
+      mergedMap.set(key, { ...item, project_salary_expense: 0});
     });
 
     requestData1.forEach(item => {
@@ -1323,10 +1437,8 @@ const projectLastDate = async (year_id) => {
       }
     });
 
+
     const mergedData = Array.from(mergedMap.values());
-
-
-
     if (mergedData.length && mergedData.length > 0) {
       return { status: 1, result: mergedData };
     } else {

@@ -1783,17 +1783,137 @@ exports.xlsxOfferInspactionItem = async (req, res) => {
   }
 }
 
+// exports.getRequest = async (req, res) => {
+//   const { tag, project } = req.body;
+// console.log("req.body", req.body);
+//   if (req.user && !req.err) {
+//     try {
+//       const filter = { deleted: false, tag };
+//       if (project) {
+//         filter.project = project;
+//       }
+//       const data = await RequestModal.find(filter, { deleted: 0 })
+//         .sort({ createdAt: -1 })
+//         .populate({
+//           path: "project",
+//           select: "name party work_order_no",
+//           populate: {
+//             path: "party",
+//             select: "name",
+//           },
+//         })
+//         .populate("approvedBy", "name")
+//         .populate("preparedBy", "user_name")
+//         .populate("department", "name")
+//         .populate("firm_id", "name")
+//         .populate('storeLocation', 'name')
+//         .populate("year_id", "start_year end_year")
+//         .populate({
+//           path: "drawing_id",
+//           select:
+//             "drawing_no draw_receive_date rev assembly_no status sheet_no unit assembly_quantity drawing_pdf drawing_pdf_name issued_person issued_date",
+//           populate: {
+//             path: "issued_person",
+//             select: "name",
+//           },
+//         });
+
+//       const finalData = await Promise.all(
+//         data.map(async (elem) => {
+//           const items = await TransactionItems.find(
+//             { deleted: false, requestId: elem._id },
+//             { deleted: 0, __v: 0 }
+//           )
+//             .populate("preffered_supplier.supId", "name email address phone")
+//             .populate("main_supplier", "name email address phone")
+//             .populate({
+//               path: "itemName",
+//               select: "name",
+//               populate: { path: "unit", select: "name" },
+//             });
+
+//           let drawingDetails = null;
+//           if (elem?.drawing_id !== null) {
+//             const drawingItems = await TransactionItems.find(
+//               { deleted: false, drawingId: elem?.drawing_id?._id },
+//               { deleted: 0 }
+//             ).populate("itemName", "name");
+//             drawingDetails = {
+//               ...elem?.drawing_id.toObject(),
+//               items: drawingItems,
+//             };
+//           }
+
+//           const mergeObjects = {
+//             ...elem.toObject(),
+//             items,
+//             drawing_id: drawingDetails,
+//           };
+
+//           return mergeObjects;
+//         })
+//       );
+
+//       if (finalData) {
+//         const message =
+//           parseInt(tag) === OrderTypes["Purchase Order"]
+//             ? "Purchase Request List"
+//             : "Sales Request List";
+//         sendResponse(res, 200, true, finalData, message);
+//       } else {
+//         const message =
+//           parseInt(tag) === OrderTypes["Purchase Order"]
+//             ? "Purchase Request not found"
+//             : "Sale Request not found";
+//         sendResponse(res, 200, true, finalData, message);
+//       }
+//     } catch (err) {
+//       sendResponse(res, 500, false, {}, "Something went wrong");
+//     }
+//   } else {
+//     sendResponse(res, 401, false, {}, "Unauthorized");
+//   }
+// };
+
+
 exports.getRequest = async (req, res) => {
-  const { tag, project } = req.body;
+  const { tag, project, page, limit, search, status } = req.body;
+
+  console.log("req.body", req.body);
 
   if (req.user && !req.err) {
     try {
       const filter = { deleted: false, tag };
+
       if (project) {
         filter.project = project;
       }
-      const data = await RequestModal.find(filter, { deleted: 0 })
-        .sort({ createdAt: -1 })
+
+      if (search && search.trim() !== "") {
+        filter.material_po_no = { $regex: search.trim(), $options: "i" };
+      }
+    
+      if (status && status !== "") {
+        filter.status = parseInt(status);
+      }
+      // Count total matching documents
+      const totalCount = await RequestModal.countDocuments(filter);
+
+      // Initialize query
+      let query = RequestModal.find(filter, { deleted: 0 }).sort({ createdAt: -1 });
+
+      // Apply pagination only if both page and limit are provided and valid
+      let skip = 0;
+      let limitValue = 0;
+
+      if (page && limit && !isNaN(page) && !isNaN(limit)) {
+        skip = (parseInt(page) - 1) * parseInt(limit);
+        limitValue = parseInt(limit);
+        query = query.skip(skip).limit(limitValue);
+      }
+
+      // Populate fields
+      const data = await query
         .populate({
           path: "project",
           select: "name party work_order_no",
@@ -1806,7 +1926,7 @@ exports.getRequest = async (req, res) => {
         .populate("preparedBy", "user_name")
         .populate("department", "name")
         .populate("firm_id", "name")
-        .populate('storeLocation', 'name')
+        .populate("storeLocation", "name")
         .populate("year_id", "start_year end_year")
         .populate({
           path: "drawing_id",
@@ -1818,6 +1938,7 @@ exports.getRequest = async (req, res) => {
           },
         });
 
+      // Fetch items and drawing details per request
       const finalData = await Promise.all(
         data.map(async (elem) => {
           const items = await TransactionItems.find(
@@ -1838,42 +1959,297 @@ exports.getRequest = async (req, res) => {
               { deleted: false, drawingId: elem?.drawing_id?._id },
               { deleted: 0 }
             ).populate("itemName", "name");
+
             drawingDetails = {
               ...elem?.drawing_id.toObject(),
               items: drawingItems,
             };
           }
 
-          const mergeObjects = {
+          return {
             ...elem.toObject(),
             items,
             drawing_id: drawingDetails,
           };
-
-          return mergeObjects;
         })
       );
 
-      if (finalData) {
-        const message =
-          parseInt(tag) === OrderTypes["Purchase Order"]
-            ? "Purchase Request List"
-            : "Sales Request List";
-        sendResponse(res, 200, true, finalData, message);
-      } else {
-        const message =
-          parseInt(tag) === OrderTypes["Purchase Order"]
-            ? "Purchase Request not found"
-            : "Sale Request not found";
-        sendResponse(res, 200, true, finalData, message);
-      }
+      const message =
+        parseInt(tag) === OrderTypes["Purchase Order"]
+          ? "Purchase Request List"
+          : "Sales Request List";
+
+      // Send response
+      sendResponse(res, 200, true, {
+        data: finalData,
+        pagination: {
+          total: totalCount,
+          page: page ? parseInt(page) : null,
+          limit: limit ? parseInt(limit) : null,
+          totalPages:
+            page && limit ? Math.ceil(totalCount / parseInt(limit)) : 1,
+        },
+      }, message);
+
     } catch (err) {
+      console.error(err);
       sendResponse(res, 500, false, {}, "Something went wrong");
     }
   } else {
     sendResponse(res, 401, false, {}, "Unauthorized");
   }
 };
+
+exports.getRequestStatus = async (req, res) => {
+  const { tag, project, page, limit, search, status } = req.body;
+
+  console.log("req.body", req.body);
+
+  if (req.user && !req.err) {
+    try {
+      const filter = { deleted: false, tag };
+
+      if (project) {
+        filter.project = project;
+      }
+
+      if (search && search.trim() !== "") {
+        filter.material_po_no = { $regex: search.trim(), $options: "i" };
+      }
+      
+
+      // if (status && status !== "") {
+      //   filter.status = parseInt(status);
+      // }
+if (status && status !== "") {
+  const statusArray = status.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+  if (statusArray.length > 0) {
+    filter.status = { $in: statusArray };
+  }
+} else {
+  filter.status = { $nin: [1, 3] };
+}
+
+      
+      // Count total matching documents
+      const totalCount = await RequestModal.countDocuments(filter);
+
+      // Initialize query
+      let query = RequestModal.find(filter, { deleted: 0 }).sort({ createdAt: -1 });
+
+      // Apply pagination only if both page and limit are provided and valid
+      let skip = 0;
+      let limitValue = 0;
+
+      if (page && limit && !isNaN(page) && !isNaN(limit)) {
+        skip = (parseInt(page) - 1) * parseInt(limit);
+        limitValue = parseInt(limit);
+        query = query.skip(skip).limit(limitValue);
+      }
+
+      // Populate fields
+      const data = await query
+        .populate({
+          path: "project",
+          select: "name party work_order_no",
+          populate: {
+            path: "party",
+            select: "name",
+          },
+        })
+        .populate("approvedBy", "name")
+        .populate("preparedBy", "user_name")
+        .populate("department", "name")
+        .populate("firm_id", "name")
+        .populate("storeLocation", "name")
+        .populate("year_id", "start_year end_year")
+        .populate({
+          path: "drawing_id",
+          select:
+            "drawing_no draw_receive_date rev assembly_no status sheet_no unit assembly_quantity drawing_pdf drawing_pdf_name issued_person issued_date",
+          populate: {
+            path: "issued_person",
+            select: "name",
+          },
+        });
+
+      // Fetch items and drawing details per request
+      const finalData = await Promise.all(
+        data.map(async (elem) => {
+          const items = await TransactionItems.find(
+            { deleted: false, requestId: elem._id },
+            { deleted: 0, __v: 0 }
+          )
+            .populate("preffered_supplier.supId", "name email address phone")
+            .populate("main_supplier", "name email address phone")
+            .populate({
+              path: "itemName",
+              select: "name",
+              populate: { path: "unit", select: "name" },
+            });
+
+          let drawingDetails = null;
+          if (elem?.drawing_id !== null) {
+            const drawingItems = await TransactionItems.find(
+              { deleted: false, drawingId: elem?.drawing_id?._id },
+              { deleted: 0 }
+            ).populate("itemName", "name");
+
+            drawingDetails = {
+              ...elem?.drawing_id.toObject(),
+              items: drawingItems,
+            };
+          }
+
+          return {
+            ...elem.toObject(),
+            items,
+            drawing_id: drawingDetails,
+          };
+        })
+      );
+
+      const message =
+        parseInt(tag) === OrderTypes["Purchase Order"]
+          ? "Purchase Request List"
+          : "Sales Request List";
+
+      // Send response
+      sendResponse(res, 200, true, {
+        data: finalData,
+        pagination: {
+          total: totalCount,
+          page: page ? parseInt(page) : null,
+          limit: limit ? parseInt(limit) : null,
+          totalPages:
+            page && limit ? Math.ceil(totalCount / parseInt(limit)) : 1,
+        },
+      }, message);
+
+    } catch (err) {
+      console.error(err);
+      sendResponse(res, 500, false, {}, "Something went wrong");
+    }
+  } else {
+    sendResponse(res, 401, false, {}, "Unauthorized");
+  }
+};
+
+// exports.getRequest = async (req, res) => {
+//   const { tag, project, page , limit , search , status } = req.body;
+
+// // if (status) {
+// //   filter.status = parseInt(status);
+// // }
+
+
+// console.log("req.body", req.body);
+//   if (req.user && !req.err) {
+//     try {
+//       const filter = { deleted: false, tag };
+//       if (project) {
+//         filter.project = project;
+//       }
+
+//         if (search && search.trim() !== "") {
+//         filter.material_po_no = { $regex: search.trim(), $options: "i" }; // case-insensitive
+//       }
+
+//       if (status && status !== '') {
+//   filter.status = parseInt(status);
+// }
+//       const skip = (parseInt(page) - 1) * parseInt(limit);
+
+//       // Get total count
+//       const totalCount = await RequestModal.countDocuments(filter);
+
+//       // Get paginated data
+//       const data = await RequestModal.find(filter, { deleted: 0 })
+//         .sort({ createdAt: -1 })
+//         .skip(skip)
+//         .limit(parseInt(limit))
+//         .populate({
+//           path: "project",
+//           select: "name party work_order_no",
+//           populate: {
+//             path: "party",
+//             select: "name",
+//           },
+//         })
+//         .populate("approvedBy", "name")
+//         .populate("preparedBy", "user_name")
+//         .populate("department", "name")
+//         .populate("firm_id", "name")
+//         .populate("storeLocation", "name")
+//         .populate("year_id", "start_year end_year")
+//         .populate({
+//           path: "drawing_id",
+//           select:
+//             "drawing_no draw_receive_date rev assembly_no status sheet_no unit assembly_quantity drawing_pdf drawing_pdf_name issued_person issued_date",
+//           populate: {
+//             path: "issued_person",
+//             select: "name",
+//           },
+//         });
+
+//       const finalData = await Promise.all(
+//         data.map(async (elem) => {
+//           const items = await TransactionItems.find(
+//             { deleted: false, requestId: elem._id },
+//             { deleted: 0, __v: 0 }
+//           )
+//             .populate("preffered_supplier.supId", "name email address phone")
+//             .populate("main_supplier", "name email address phone")
+//             .populate({
+//               path: "itemName",
+//               select: "name",
+//               populate: { path: "unit", select: "name" },
+//             });
+
+//           let drawingDetails = null;
+//           if (elem?.drawing_id !== null) {
+//             const drawingItems = await TransactionItems.find(
+//               { deleted: false, drawingId: elem?.drawing_id?._id },
+//               { deleted: 0 }
+//             ).populate("itemName", "name");
+//             drawingDetails = {
+//               ...elem?.drawing_id.toObject(),
+//               items: drawingItems,
+//             };
+//           }
+
+//           return {
+//             ...elem.toObject(),
+//             items,
+//             drawing_id: drawingDetails,
+//           };
+//         })
+//       );
+
+//       const message =
+//         parseInt(tag) === OrderTypes["Purchase Order"]
+//           ? "Purchase Request List"
+//           : "Sales Request List";
+
+//       sendResponse(res, 200, true, {
+//         data: finalData,
+//         pagination: {
+//           total: totalCount,
+//           page: parseInt(page),
+//           limit: parseInt(limit),
+//           totalPages: Math.ceil(totalCount / parseInt(limit)),
+//         },
+//       }, message);
+//     } catch (err) {
+//       console.error(err);
+//       sendResponse(res, 500, false, {}, "Something went wrong");
+//     }
+//   } else {
+//     sendResponse(res, 401, false, {}, "Unauthorized");
+//   }
+// };
+
+
 
 
 exports.getRequestEdit = async (req, res) => {

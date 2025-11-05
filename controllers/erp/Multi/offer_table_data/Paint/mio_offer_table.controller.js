@@ -60,6 +60,15 @@ exports.manageMioOfferTable = async (req, res) => {
                             grid_id: o.grid_id,
                             mio_balance_grid_qty: o.mio_balance_grid_qty,
                             mio_used_grid_qty: o.mio_used_grid_qty,
+
+
+                            item_name: o.item_name,
+                            drawing_no: o.drawing_no,
+                            grid_no: o.grid_no,
+                            dispatch_no: o.dispatch_no,
+                            unit_assembly_weight: o.unit_assembly_weight,
+                            total_assembly_weight: o.total_assembly_weight,
+                            remarks: o.remarks
                         }],
                     },
                 );
@@ -151,6 +160,135 @@ exports.deleteMioOffer = async (req, res) => {
     }
 };
  
+// exports.getMioOffer = async (req, res) => {
+//     const { project_id, paint_system_id } = req.body;
+//     if (!req.user || req.error) {
+//         return sendResponse(res, 401, false, {}, "Unauthorized");
+//     }
+//     if (!project_id) {
+//         return sendResponse(res, 400, false, {}, "Missing Parameter");
+//     }
+//     try {
+ 
+//         const requestData = await MioOfferTable.aggregate([
+//             { $match: { paint_system_id: new ObjectId(paint_system_id) } },
+//             { $unwind: "$items" },
+//             {
+//                 $lookup: {
+//                     from: "erp-planner-drawings",
+//                     localField: "items.drawing_id",
+//                     foreignField: "_id",
+//                     as: "drawingDetails",
+//                     pipeline: [
+//                         {
+//                             $lookup: {
+//                                 from: "bussiness-projects",
+//                                 localField: "project",
+//                                 foreignField: "_id",
+//                                 as: "projectDetails",
+//                                 pipeline: [
+//                                     {
+//                                         $lookup: {
+//                                             from: "store-parties",
+//                                             localField: "party",
+//                                             foreignField: "_id",
+//                                             as: "clientDetails",
+//                                         },
+//                                     },
+//                                 ],
+//                             },
+//                         },
+//                     ],
+//                 },
+//             },
+//             {
+//                 $lookup: {
+//                     from: "erp-drawing-grids",
+//                     localField: "items.grid_id",
+//                     foreignField: "_id",
+//                     as: "gridDetails",
+//                 },
+//             },
+//             {
+//                 $lookup: {
+//                     from: "erp-drawing-grids",
+//                     localField: "items.grid_id",
+//                     foreignField: "_id",
+//                     as: "gridDetails",
+//                 },
+//             },
+//             {
+//                 $lookup: {
+//                     from: "multi-erp-painting-dispatch-notes",
+//                     localField: "items.dispatch_id",
+//                     foreignField: "_id",
+//                     as: "dispatchDetails",
+//                 },
+//             },
+//             {
+//                 $addFields: {
+//                     drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
+//                     gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
+//                     paintDetails: { $arrayElemAt: ["$paintDetails", 0] },
+//                     dispatchDetails: { $arrayElemAt: ["$dispatchDetails", 0] },
+//                 },
+//             },
+//             {
+//                 $addFields: {
+//                     projectDetails: {
+//                         $arrayElemAt: ["$drawingDetails.projectDetails", 0],
+//                     }
+//                 },
+//             },
+//             {
+//                 $addFields: {
+//                     clientDetails: {
+//                         $arrayElemAt: ["$projectDetails.clientDetails", 0],
+//                     },
+//                 },
+//             },
+//             {
+//                 $match: {
+//                     "projectDetails._id": new ObjectId(project_id)
+//                 }
+//             },
+//             {
+//                 $project: {
+//                     _id: 1,
+//                     main_id: "$items.main_id",
+//                     item_detail_id: "$items._id",
+//                     mio_no: 1,
+//                     dispatch_no: "$dispatchDetails.report_no",
+//                     dispatch_site: "$dispatchDetails.dispatch_site",
+//                     dispatch_id: "$dispatchDetails._id",
+//                     drawing_no: "$drawingDetails.drawing_no",
+//                     drawing_id: "$drawingDetails._id",
+//                     rev: "$drawingDetails.rev",
+//                     sheet_no: "$drawingDetails.sheet_no",
+//                     assembly_no: "$drawingDetails.assembly_no",
+//                     assembly_quantity: "$drawingDetails.assembly_quantity",
+//                     grid_no: "$gridDetails.grid_no",
+//                     grid_id: "$gridDetails._id",
+//                     grid_qty: "$gridDetails.grid_qty",
+//                     mio_balance_grid_qty: "$items.mio_balance_grid_qty",
+//                     mio_used_grid_qty: "$items.mio_used_grid_qty",
+//                     moved_next_step: "$items.moved_next_step",
+//                     remarks: "$items.remarks",
+//                 }
+//             }
+//         ]);
+ 
+//         if (requestData.length && requestData.length > 0) {
+//             sendResponse(res, 200, true, requestData, "MIO offer data found");
+//         } else {
+//             sendResponse(res, 200, false, [], `MIO offer data not found`);
+//         }
+//     } catch (error) {
+//         console.log("error", error)
+//         sendResponse(res, 500, false, {}, "Something went wrong11");
+//     }
+// };
+
 exports.getMioOffer = async (req, res) => {
     const { project_id, paint_system_id } = req.body;
     if (!req.user || req.error) {
@@ -159,127 +297,166 @@ exports.getMioOffer = async (req, res) => {
     if (!project_id) {
         return sendResponse(res, 400, false, {}, "Missing Parameter");
     }
+
     try {
- 
         const requestData = await MioOfferTable.aggregate([
             { $match: { paint_system_id: new ObjectId(paint_system_id) } },
             { $unwind: "$items" },
+
             {
-                $lookup: {
-                    from: "erp-planner-drawings",
-                    localField: "items.drawing_id",
-                    foreignField: "_id",
-                    as: "drawingDetails",
-                    pipeline: [
+                $facet: {
+                    // CASE 1: Linked Data (valid ObjectIds)
+                    linkedData: [
+                        {
+                            $match: {
+                                "items.drawing_id": { $type: "objectId" },
+                                "items.grid_id": { $type: "objectId" },
+                                "items.main_id": { $type: "objectId" },
+                                "items.dispatch_id": { $type: "objectId" },
+                            },
+                        },
                         {
                             $lookup: {
-                                from: "bussiness-projects",
-                                localField: "project",
+                                from: "erp-planner-drawings",
+                                localField: "items.drawing_id",
                                 foreignField: "_id",
-                                as: "projectDetails",
+                                as: "drawingDetails",
                                 pipeline: [
                                     {
                                         $lookup: {
-                                            from: "store-parties",
-                                            localField: "party",
+                                            from: "bussiness-projects",
+                                            localField: "project",
                                             foreignField: "_id",
-                                            as: "clientDetails",
+                                            as: "projectDetails",
+                                            pipeline: [
+                                                {
+                                                    $lookup: {
+                                                        from: "store-parties",
+                                                        localField: "party",
+                                                        foreignField: "_id",
+                                                        as: "clientDetails",
+                                                    },
+                                                },
+                                            ],
                                         },
                                     },
                                 ],
                             },
                         },
+                        {
+                            $lookup: {
+                                from: "erp-drawing-grids",
+                                localField: "items.grid_id",
+                                foreignField: "_id",
+                                as: "gridDetails",
+                            },
+                        },
+                        {
+                            $lookup: {
+                                from: "multi-erp-painting-dispatch-notes",
+                                localField: "items.dispatch_id",
+                                foreignField: "_id",
+                                as: "dispatchDetails",
+                            },
+                        },
+                        {
+                            $addFields: {
+                                drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
+                                gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
+                                dispatchDetails: { $arrayElemAt: ["$dispatchDetails", 0] },
+                                projectDetails: { $arrayElemAt: ["$drawingDetails.projectDetails", 0] },
+                                clientDetails: { $arrayElemAt: ["$drawingDetails.projectDetails.0.clientDetails", 0] },
+                            },
+                        },
+                        {
+                            $match: {
+                                "projectDetails._id": new ObjectId(project_id),
+                            },
+                        },
+                        {
+                            $project: {
+                                _id: 1,
+                                mio_no: 1,
+                                main_id: "$items.main_id",
+                                item_detail_id: "$items._id",
+                                dispatch_no: "$dispatchDetails.report_no",
+                                dispatch_site: "$dispatchDetails.dispatch_site",
+                                dispatch_id: "$dispatchDetails._id",
+                                drawing_no: "$drawingDetails.drawing_no",
+                                drawing_id: "$drawingDetails._id",
+                                rev: "$drawingDetails.rev",
+                                sheet_no: "$drawingDetails.sheet_no",
+                                assembly_no: "$drawingDetails.assembly_no",
+                                assembly_quantity: "$drawingDetails.assembly_quantity",
+                                grid_no: "$gridDetails.grid_no",
+                                grid_id: "$gridDetails._id",
+                                grid_qty: "$gridDetails.grid_qty",
+                                mio_balance_grid_qty: "$items.mio_balance_grid_qty",
+                                mio_used_grid_qty: "$items.mio_used_grid_qty",
+                                moved_next_step: "$items.moved_next_step",
+                                remarks: "$items.remarks",
+                                item_name: "$items.item_name",
+                            },
+                        },
+                    ],
+
+                    // CASE 2: Raw Form Data (no ObjectIds)
+                    rawFormData: [
+                        {
+                            $match: {
+                                $or: [
+                                    { "items.drawing_id": { $exists: false } },
+                                    { "items.drawing_id": { $not: { $type: "objectId" } } },
+                                ],
+                            },
+                        },
+                        {
+                            $project: {
+                                _id: 1,
+                                mio_no: 1,
+                                main_id: null,
+                                item_detail_id: "$items._id",
+                                dispatch_no: "$items.dispatch_no",
+                                dispatch_site: null,
+                                dispatch_id: null,
+                                drawing_no: "$items.drawing_no",
+                                drawing_id: null,
+                                rev: null,
+                                sheet_no: null,
+                                assembly_no: null,
+                                assembly_quantity: null,
+                                grid_no: "$items.grid_no",
+                                grid_id: null,
+                                grid_qty: null,
+                                mio_balance_grid_qty: "$items.mio_balance_grid_qty",
+                                mio_used_grid_qty: "$items.mio_used_grid_qty",
+                                moved_next_step: "$items.moved_next_step",
+                                remarks: "$items.remarks",
+                                item_name: "$items.item_name",
+                            },
+                        },
                     ],
                 },
             },
-            {
-                $lookup: {
-                    from: "erp-drawing-grids",
-                    localField: "items.grid_id",
-                    foreignField: "_id",
-                    as: "gridDetails",
-                },
-            },
-            {
-                $lookup: {
-                    from: "erp-drawing-grids",
-                    localField: "items.grid_id",
-                    foreignField: "_id",
-                    as: "gridDetails",
-                },
-            },
-            {
-                $lookup: {
-                    from: "multi-erp-painting-dispatch-notes",
-                    localField: "items.dispatch_id",
-                    foreignField: "_id",
-                    as: "dispatchDetails",
-                },
-            },
-            {
-                $addFields: {
-                    drawingDetails: { $arrayElemAt: ["$drawingDetails", 0] },
-                    gridDetails: { $arrayElemAt: ["$gridDetails", 0] },
-                    paintDetails: { $arrayElemAt: ["$paintDetails", 0] },
-                    dispatchDetails: { $arrayElemAt: ["$dispatchDetails", 0] },
-                },
-            },
-            {
-                $addFields: {
-                    projectDetails: {
-                        $arrayElemAt: ["$drawingDetails.projectDetails", 0],
-                    }
-                },
-            },
-            {
-                $addFields: {
-                    clientDetails: {
-                        $arrayElemAt: ["$projectDetails.clientDetails", 0],
-                    },
-                },
-            },
-            {
-                $match: {
-                    "projectDetails._id": new ObjectId(project_id)
-                }
-            },
-            {
-                $project: {
-                    _id: 1,
-                    main_id: "$items.main_id",
-                    item_detail_id: "$items._id",
-                    mio_no: 1,
-                    dispatch_no: "$dispatchDetails.report_no",
-                    dispatch_site: "$dispatchDetails.dispatch_site",
-                    dispatch_id: "$dispatchDetails._id",
-                    drawing_no: "$drawingDetails.drawing_no",
-                    drawing_id: "$drawingDetails._id",
-                    rev: "$drawingDetails.rev",
-                    sheet_no: "$drawingDetails.sheet_no",
-                    assembly_no: "$drawingDetails.assembly_no",
-                    assembly_quantity: "$drawingDetails.assembly_quantity",
-                    grid_no: "$gridDetails.grid_no",
-                    grid_id: "$gridDetails._id",
-                    grid_qty: "$gridDetails.grid_qty",
-                    mio_balance_grid_qty: "$items.mio_balance_grid_qty",
-                    mio_used_grid_qty: "$items.mio_used_grid_qty",
-                    moved_next_step: "$items.moved_next_step",
-                    remarks: "$items.remarks",
-                }
-            }
         ]);
- 
-        if (requestData.length && requestData.length > 0) {
-            sendResponse(res, 200, true, requestData, "MIO offer data found");
+
+        // Combine both linked and raw data
+        const combinedData = [
+            ...(requestData[0]?.linkedData || []),
+            ...(requestData[0]?.rawFormData || []),
+        ];
+
+        if (combinedData.length > 0) {
+            sendResponse(res, 200, true, combinedData, "MIO offer data found");
         } else {
-            sendResponse(res, 200, false, [], `MIO offer data not found`);
+            sendResponse(res, 200, false, [], "MIO offer data not found");
         }
     } catch (error) {
-        console.log("error", error)
-        sendResponse(res, 500, false, {}, "Something went wrong11");
+        console.error("getMioOffer error:", error);
+        sendResponse(res, 500, false, {}, "Something went wrong");
     }
 };
- 
+
 exports.updateSurfaceGridBalance = async (req, res) => {
     const { items, is_delete } = req.body;
     if (!req.user || req.error) {
